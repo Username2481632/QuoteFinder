@@ -1,0 +1,16 @@
+Please evaluate this paragraph from a book. Respond with ONLY "1" if the paragraph contains:
+- Profound insights or wisdom
+- Actionable advice or strategies  
+- Memorable quotes worth remembering
+- Key concepts that change perspective
+- Important life lessons or principles
+
+Respond with ONLY "0" if the paragraph is:
+- Basic story narrative or description
+- Filler content or transitions
+- Obvious statements without depth
+- Mundane dialogue or events
+
+You must respond with only the number 1 or 0, absolutely nothing else.
+
+Paragraph: {paragraph}
