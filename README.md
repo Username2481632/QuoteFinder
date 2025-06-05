@@ -1,6 +1,16 @@
-# PDF Quote Finder
+# Social Comparison Finder
 
-A Python script that processes PDF books paragraph by paragraph using a local language model to identify and extract interesting quotes or passages.
+A Python script that processes "The Adventures of Huckleberry Finn" paragraph by paragraph using a local language model to identify passages where characters compare themselves to others.
+
+## What It Finds
+
+The script specifically looks for paragraphs containing:
+- Self-comparison thoughts and feelings
+- Characters measuring themselves against others
+- Expressions of envy, jealousy, or inadequacy
+- Competitive internal dialogue
+- Social comparison of any kind (appearance, intelligence, status, etc.)
+- Self-doubt triggered by seeing others' qualities
 
 ## Setup Instructions for M2 Mac Mini
 
@@ -18,12 +28,8 @@ ollama serve
 ### 2. Pull the DeepSeek Model
 
 ```bash
-# Pull the DeepSeek-R1 distill model (or similar small model)
+# Pull the DeepSeek-R1 distill model
 ollama pull deepseek-r1-distill-llama-8b
-
-# Alternative smaller models if needed:
-# ollama pull llama3.2:3b
-# ollama pull phi3:mini
 ```
 
 ### 3. Install Python Dependencies
@@ -39,48 +45,66 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Basic Usage
+### Simple Usage
 
 ```bash
-python pdf_quote_finder.py path/to/your/book.pdf
+python main.py
 ```
 
-### Advanced Usage
+That's it! The script automatically:
+- Processes the included Huckleberry Finn text
+- Uses the hardcoded social comparison prompt
+- Saves results to `social_comparisons.txt`
+- Tracks progress in `progress.json`
 
-```bash
-# Specify output file prefix
-python pdf_quote_finder.py book.pdf -o my_quotes
+## Features
 
-# Use different model
-python pdf_quote_finder.py book.pdf -m llama3.2:3b
+### ✅ **Progress Tracking**
+- Automatically saves progress after each paragraph
+- Resume from where you left off if interrupted
+- Progress stored in `progress.json`
 
-# Use custom prompt (see custom_prompt_example.txt)
-python pdf_quote_finder.py book.pdf --prompt my_custom_prompt.txt
-```
+### ✅ **Real-time Output**
+- Results are appended to `social_comparisons.txt` immediately when found
+- No need to wait for the entire process to complete
+- See results as they're discovered
+
+### ✅ **Probability-based Evaluation**
+- Uses model confidence scores instead of text parsing
+- More reliable than simple text matching
+- Shows confidence levels for each finding
 
 ## Output
 
-The script generates two output files:
+The script generates:
 
-1. **interesting_quotes.json** - Structured data with page numbers and metadata
-2. **interesting_quotes.txt** - Human-readable format for easy review
+1. **social_comparisons.txt** - Real-time results with confidence scores
+2. **progress.json** - Progress tracking (deleted when complete)
 
 ## How It Works
 
-1. **PDF Processing**: Uses `pdfplumber` to extract text while preserving page numbers
-2. **Paragraph Splitting**: Intelligently splits text into meaningful paragraphs
-3. **LLM Evaluation**: Sends each paragraph to your local model with a prompt asking for "1" (interesting) or "0" (skip)
-4. **Logging**: Saves paragraphs rated as "1" along with their page numbers
+1. **Text Processing**: Extracts clean text from the included HTML file
+2. **Paragraph Splitting**: Intelligently splits text into meaningful paragraphs  
+3. **LLM Evaluation**: Uses hardcoded prompt to identify social comparison content
+4. **Real-time Logging**: Immediately saves interesting paragraphs as they're found
+5. **Progress Tracking**: Allows resuming if interrupted
 
-## Customizing the Prompt
+## Resuming Interrupted Processing
 
-You can customize what the model considers "interesting" by creating a custom prompt file. See `custom_prompt_example.txt` for an example.
+If the script is interrupted (Ctrl+C or system crash), simply run it again:
+
+```bash
+python main.py
+```
+
+It will automatically resume from where it left off using the `progress.json` file.
 
 ## Performance Notes
 
-- Processing time depends on PDF size and model speed
+- Processing time depends on text size and model speed
 - DeepSeek-R1 distill is optimized for speed while maintaining quality
-- On M2 Mac Mini, expect ~1-3 seconds per paragraph depending on model size
+- On M2 Mac Mini, expect ~1-3 seconds per paragraph
+- Progress is saved after each paragraph for safety
 
 ## Troubleshooting
 
@@ -95,7 +119,5 @@ ollama pull deepseek-r1-distill-llama-8b  # Pull the model
 ollama serve  # Make sure Ollama is running
 ```
 
-### Memory issues with large PDFs
-- Use a smaller model like `phi3:mini`
-- Process PDFs in smaller sections
-- Increase swap space if needed
+### "Text file not found"
+The script expects `huckleberry_finn.html` to be in the same directory. It should have been downloaded automatically when you cloned the repo.
