@@ -89,9 +89,7 @@ Paragraph: {paragraph}"""
                 f.write("Social Comparison Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
         
-        # Get explanation for this finding
-        if self.verbose:
-            print("Getting explanation...")
+        # Get explanation for this finding (quietly)
         explanation = self.get_explanation(text)
         
         with open(self.output_file, 'a', encoding='utf-8') as f:
@@ -101,10 +99,10 @@ Paragraph: {paragraph}"""
             f.write(f"Explanation: {explanation}\n\n")
             f.write(f"{text}\n\n")
         
+        # Only print detailed info in verbose mode
         if self.verbose:
             print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - {explanation}")
-        else:
-            print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - Saved to {self.output_file}")
+        # In non-verbose mode, the progress bar will handle the display
 
     def _extract_text_from_html(self, html_path: str) -> str:
         """Extract clean text from HTML file."""
