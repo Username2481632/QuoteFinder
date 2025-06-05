@@ -172,12 +172,27 @@ Paragraph: {paragraph}"""
         
         generated_text = response['message']['content'].strip()
         
+        # Debug: show the full response
+        print(f"Full model response: '{generated_text}'")
+        
         # Handle DeepSeek-R1 thinking format - extract final answer after </think>
         if '</think>' in generated_text:
             # Get text after the thinking tags
             final_answer = generated_text.split('</think>')[-1].strip()
+        elif '<think>' in generated_text:
+            # If we have <think> but no </think>, the response was likely truncated
+            # Try to extract anything after the thinking that looks like "1" or "0"
+            lines = generated_text.split('\n')
+            final_answer = ""
+            for line in lines:
+                clean_line = line.strip()
+                if clean_line in ['0', '1']:
+                    final_answer = clean_line
+                    break
         else:
             final_answer = generated_text
+        
+        print(f"Extracted final answer: '{final_answer}'")
         
         # Parse the response for clear answers
         if final_answer == self.positive_label:
