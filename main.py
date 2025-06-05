@@ -67,11 +67,25 @@ class TextClassifier:
         """Load configuration from JSON file."""
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                config = json.load(f)
         except FileNotFoundError:
             raise FileNotFoundError(f"Configuration file '{config_file}' not found. Please create it or use the default 'sample_config.json'.")
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
+        
+        # Validate required fields
+        required_fields = ['model_name', 'classification_prompt', 'explanation_prompt']
+        missing_fields = [field for field in required_fields if field not in config]
+        
+        if missing_fields:
+            raise ValueError(f"Configuration file '{config_file}' is missing required fields: {', '.join(missing_fields)}")
+        
+        # Validate that fields are not empty
+        empty_fields = [field for field in required_fields if not config[field].strip()]
+        if empty_fields:
+            raise ValueError(f"Configuration file '{config_file}' has empty values for: {', '.join(empty_fields)}")
+        
+        return config
         
     def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
@@ -598,7 +612,11 @@ def main():
         sys.exit(1)
     
     # Initialize classifier with config file
-    classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple, restart=args.restart)
+    try:
+        classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple, restart=args.restart)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Configuration Error: {e}")
+        sys.exit(1)
     
     # Check if model is available
     verify_model_available(classifier.model_name)
