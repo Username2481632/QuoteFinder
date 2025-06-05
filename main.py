@@ -12,11 +12,13 @@ Requirements:
 - Python packages: beautifulsoup4, ollama
 
 Usage:
-    python pdf_quote_finder.py
+    python main.py [--verbose]
 """
 
+import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import List, Tuple, Dict
 from bs4 import BeautifulSoup
@@ -24,14 +26,16 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, model_name: str = "deepseek-r1:1.5b"):
+    def __init__(self, model_name: str = "deepseek-r1:1.5b", verbose: bool = False):
         """
         Initialize the Text Classifier.
         
         Args:
             model_name: Name of the Ollama model to use
+            verbose: Whether to show detailed debug output
         """
         self.model_name = model_name
+        self.verbose = verbose
         self.prompt_template = self._get_classification_prompt()
         self.progress_file = "progress.json"
         self.output_file = "results.txt"
@@ -159,7 +163,8 @@ Paragraph: {paragraph}"""
         max_attempts = 3
         
         for attempt in range(1, max_attempts + 1):
-            print(f"Attempt {attempt}/{max_attempts}...")
+            if self.verbose:
+                print(f"Attempt {attempt}/{max_attempts}...")
             
             response = ollama.chat(
                 model=self.model_name,
@@ -177,7 +182,8 @@ Paragraph: {paragraph}"""
             )
             
             generated_text = response['message']['content'].strip()
-            print(f"Full model response: '{generated_text}'")
+            if self.verbose:
+                print(f"Full model response: '{generated_text}'")
             
             # Handle DeepSeek-R1 thinking format - extract final answer after </think>
             if '</think>' in generated_text:
@@ -186,16 +192,19 @@ Paragraph: {paragraph}"""
             elif '<think>' in generated_text:
                 # Truncated thinking response - retry if we have attempts left
                 if attempt < max_attempts:
-                    print(f"Response truncated (has <think> but no </think>), retrying...")
+                    if self.verbose:
+                        print(f"Response truncated (has <think> but no </think>), retrying...")
                     continue
                 else:
-                    print(f"Response still truncated after {max_attempts} attempts")
+                    if self.verbose:
+                        print(f"Response still truncated after {max_attempts} attempts")
                     final_answer = ""
             else:
                 # No thinking format
                 final_answer = generated_text
             
-            print(f"Extracted final answer: '{final_answer}'")
+            if self.verbose:
+                print(f"Extracted final answer: '{final_answer}'")
             
             # Parse the response for clear answers
             if final_answer == self.positive_label:
@@ -209,11 +218,13 @@ Paragraph: {paragraph}"""
             
             # If we get here and have attempts left, something went wrong but let's try once more
             if attempt < max_attempts:
-                print(f"Unclear response, retrying...")
+                if self.verbose:
+                    print(f"Unclear response, retrying...")
                 continue
             
             # Final attempt failed - use probability resolution
-            print(f"Unclear response after {max_attempts} attempts: '{final_answer}' - checking probabilities...")
+            if self.verbose:
+                print(f"Unclear response after {max_attempts} attempts: '{final_answer}' - checking probabilities...")
             return self._resolve_by_probability(prompt)
         
         # Should never reach here
@@ -308,12 +319,17 @@ Paragraph: {paragraph}"""
             paragraphs = self._split_into_paragraphs(full_text)
             total_paragraphs = len(paragraphs)
             
-            print(f"Total paragraphs to process: {total_paragraphs}")
-            print(f"Starting from paragraph: {start_paragraph + 1}")
+            if self.verbose:
+                print(f"Total paragraphs to process: {total_paragraphs}")
+                print(f"Starting from paragraph: {start_paragraph + 1}")
+            else:
+                print(f"Processing {total_paragraphs} paragraphs...")
             
             for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph):
                 paragraph_num = i + 1
-                print(f"Processing paragraph {paragraph_num}/{total_paragraphs}: ", end="", flush=True)
+                
+                if self.verbose:
+                    print(f"Processing paragraph {paragraph_num}/{total_paragraphs}: ", end="", flush=True)
                 
                 # Query the model
                 response, confidence = self.classify_text(paragraph)
@@ -323,8 +339,15 @@ Paragraph: {paragraph}"""
                 if response == '1':
                     total_found += 1
                     self.append_result(paragraph_num, paragraph, confidence)
+                    result_status = f"● found (conf: {confidence:.2f})"
                 else:
-                    print(f"○ skipped (confidence: {confidence:.2f})")
+                    result_status = f"○ skip (conf: {confidence:.2f})"
+                
+                if self.verbose:
+                    print(result_status)
+                else:
+                    # Update progress bar with result
+                    self._update_progress(total_processed, total_paragraphs, result_status)
                 
                 # Save progress after each paragraph
                 progress = {
@@ -363,6 +386,27 @@ Paragraph: {paragraph}"""
         
         return progress
 
+    def _update_progress(self, current: int, total: int, result: str = ""):
+        """Update progress bar in place."""
+        if not self.verbose:
+            # Create a simple progress bar
+            progress = current / total
+            bar_length = 50
+            filled_length = int(bar_length * progress)
+            bar = '█' * filled_length + '░' * (bar_length - filled_length)
+            
+            # Calculate ETA or speed if we have enough data
+            status = f"[{current:4d}/{total}] {bar} {progress:.1%}"
+            if result:
+                status += f" | Last: {result}"
+            
+            # Use \r to overwrite the current line
+            print(f"\r{status}", end="", flush=True)
+            
+            # Print newline only when complete
+            if current == total:
+                print()  # Final newline
+
 
 def verify_model_available(model_name: str):
     """Verify that the specified model is available in Ollama."""
@@ -380,6 +424,10 @@ def verify_model_available(model_name: str):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed debug output")
+    args = parser.parse_args()
+    
     print("Text Classifier")
     print("=" * 30)
     
@@ -388,20 +436,23 @@ def main():
     verify_model_available(model_name)
     
     # Test the model
-    print("Trying test call to verify Ollama connection...")
+    if args.verbose:
+        print("Trying test call to verify Ollama connection...")
     ollama.chat(
         model=model_name, 
         messages=[{'role': 'user', 'content': 'test'}], 
         options={'num_predict': 1}
     )
-    print("Ollama connection successful!")
+    if args.verbose:
+        print("Ollama connection successful!")
     
     # Create classifier and process text file
-    classifier = TextClassifier(model_name=model_name)
+    classifier = TextClassifier(model_name=model_name, verbose=args.verbose)
     classifier.process_text_file("huckleberry_finn.html")
     
     print(f"\nResults saved to: {classifier.output_file}")
-    print(f"Progress file: {classifier.progress_file}")
+    if args.verbose:
+        print(f"Progress file: {classifier.progress_file}")
 
 
 if __name__ == "__main__":
