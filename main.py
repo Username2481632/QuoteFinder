@@ -77,6 +77,16 @@ Paragraph: {paragraph}"""
         except Exception as e:
             print(f"Warning: Could not save progress: {e}")
     
+    def _create_output_file_header(self):
+        """Create output file with header if it doesn't exist."""
+        if not Path(self.output_file).exists():
+            try:
+                with open(self.output_file, 'w', encoding='utf-8') as f:
+                    f.write("Social Comparison Paragraphs Found\n")
+                    f.write("=" * 50 + "\n\n")
+            except Exception as e:
+                print(f"Error creating output file: {e}")
+    
     def append_result(self, paragraph_num: int, text: str, confidence: float):
         """Append a result immediately to the output file."""
         try:
@@ -109,13 +119,23 @@ Paragraph: {paragraph}"""
             for script in soup(["script", "style"]):
                 script.decompose()
             
-            # Get text and clean it up
-            text = soup.get_text()
-            
-            # Clean up whitespace
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            text = '\n'.join(chunk for chunk in chunks if chunk)
+            # Focus on the main content - look for paragraphs
+            paragraphs = soup.find_all('p')
+            if paragraphs:
+                # If we have proper paragraph tags, use them
+                text_parts = []
+                for p in paragraphs:
+                    p_text = p.get_text().strip()
+                    if len(p_text) > 20:  # Skip very short paragraphs
+                        text_parts.append(p_text)
+                text = '\n\n'.join(text_parts)
+            else:
+                # Fallback to full text extraction
+                text = soup.get_text()
+                # Clean up whitespace
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                text = '\n'.join(chunk for chunk in chunks if chunk)
             
             return text
             
@@ -133,15 +153,19 @@ Paragraph: {paragraph}"""
 
     def _split_into_paragraphs(self, text: str) -> List[str]:
         """Split text into paragraphs."""
-        # Split by double newlines or single newlines followed by indentation
-        paragraphs = re.split(r'\n\s*\n|\n(?=\s{4,})', text)
+        # First try splitting by double newlines
+        paragraphs = re.split(r'\n\s*\n+', text)
+        
+        # If that doesn't give us many paragraphs, try single newlines
+        if len(paragraphs) < 10:
+            paragraphs = text.split('\n')
         
         # Clean and filter paragraphs
         cleaned_paragraphs = []
         for para in paragraphs:
             cleaned = self._clean_paragraph(para)
             # Skip very short paragraphs (likely page numbers, headers, etc.)
-            if len(cleaned) > 50:  # Minimum paragraph length
+            if len(cleaned) > 30:  # Reduced minimum paragraph length
                 cleaned_paragraphs.append(cleaned)
         
         return cleaned_paragraphs
@@ -300,6 +324,9 @@ Paragraph: {paragraph}"""
         if total_found > 0:
             print(f"Previously found {total_found} social comparisons")
         
+        # Always create output file header
+        self._create_output_file_header()
+        
         try:
             # Extract text from HTML
             full_text = self._extract_text_from_html(str(text_file))
@@ -347,6 +374,19 @@ Paragraph: {paragraph}"""
         print(f"Social comparisons found: {total_found}")
         if total_processed > 0:
             print(f"Success rate: {total_found/total_processed*100:.1f}%")
+        
+        # Add completion summary to output file
+        try:
+            with open(self.output_file, 'a', encoding='utf-8') as f:
+                f.write("\n" + "=" * 50 + "\n")
+                f.write("PROCESSING COMPLETE\n")
+                f.write("=" * 50 + "\n")
+                f.write(f"Total paragraphs processed: {total_processed}\n")
+                f.write(f"Social comparisons found: {total_found}\n")
+                if total_processed > 0:
+                    f.write(f"Success rate: {total_found/total_processed*100:.1f}%\n")
+        except Exception as e:
+            print(f"Error writing completion summary: {e}")
         
         # Clear progress file on completion
         try:
