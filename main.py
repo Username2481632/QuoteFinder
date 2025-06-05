@@ -45,21 +45,15 @@ class TextClassifier:
         
     def _get_classification_prompt(self) -> str:
         """Get the classification prompt. This can be easily modified for different tasks."""
-        return """Please evaluate this paragraph from a book. Respond with ONLY "1" if the paragraph contains someone comparing themselves to another person, such as:
-- Feeling inferior or superior to someone else
-- Measuring their abilities, looks, success, or traits against another person
-- Expressing envy, jealousy, or admiration based on comparison
-- Self-doubt triggered by seeing someone else's qualities
-- Competitive thoughts about being better or worse than someone
-- Social comparison of any kind (appearance, intelligence, status, achievements, etc.)
+        return """Does this paragraph contain someone comparing themselves to another person?
 
-Respond with ONLY "0" if the paragraph does NOT contain clear self-comparison to others, such as:
-- General description without comparison
-- Internal thoughts not related to comparing with others
-- Simple dialogue or narrative
-- Observations about others without self-comparison
+Examples of social comparison:
+- "I wish I was as smart as Sarah"
+- "He's so much better looking than me"
+- "I felt inferior when I saw her success"
+- "Why can't I be more like him?"
 
-You must respond with only the number 1 or 0, absolutely nothing else.
+Respond with only "1" if social comparison is present, "0" if not.
 
 Paragraph: {paragraph}"""
     def load_progress(self) -> Dict[str, int]:
@@ -433,7 +427,7 @@ Explanation:"""
                 options={
                     'temperature': 0.3,
                     'top_p': 0.9,
-                    'num_predict': 100,  # Keep it short
+                    'num_predict': 4096,  # Allow full thinking process
                     'num_ctx': 4096,
                 },
                 stream=False
