@@ -155,58 +155,69 @@ Paragraph: {paragraph}"""
         """Classify text and return label with confidence."""
         prompt = self.prompt_template.format(paragraph=text)
         
-        response = ollama.chat(
-            model=self.model_name,
-            messages=[{
-                'role': 'user',
-                'content': prompt
-            }],
-            options={
-                'temperature': 0.1,
-                'top_p': 0.9,
-                'num_predict': 10,
-                'num_ctx': 4096,
-            },
-            stream=False
-        )
+        # Try up to 3 times with same token limit
+        max_attempts = 3
         
-        generated_text = response['message']['content'].strip()
-        
-        # Debug: show the full response
-        print(f"Full model response: '{generated_text}'")
-        
-        # Handle DeepSeek-R1 thinking format - extract final answer after </think>
-        if '</think>' in generated_text:
-            # Get text after the thinking tags
-            final_answer = generated_text.split('</think>')[-1].strip()
-        elif '<think>' in generated_text:
-            # If we have <think> but no </think>, the response was likely truncated
-            # Try to extract anything after the thinking that looks like "1" or "0"
-            lines = generated_text.split('\n')
-            final_answer = ""
-            for line in lines:
-                clean_line = line.strip()
-                if clean_line in ['0', '1']:
-                    final_answer = clean_line
-                    break
-        else:
-            final_answer = generated_text
-        
-        print(f"Extracted final answer: '{final_answer}'")
-        
-        # Parse the response for clear answers
-        if final_answer == self.positive_label:
-            return self.positive_label, 0.95
-        elif final_answer == self.negative_label:
-            return self.negative_label, 0.95
-        elif self.positive_label in final_answer and self.negative_label not in final_answer:
-            return self.positive_label, 0.85
-        elif self.negative_label in final_answer and self.positive_label not in final_answer:
-            return self.negative_label, 0.85
-        else:
-            # Unclear response - use probability comparison
-            print(f"Unclear response: '{final_answer}' - checking probabilities...")
+        for attempt in range(1, max_attempts + 1):
+            print(f"Attempt {attempt}/{max_attempts}...")
+            
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[{
+                    'role': 'user',
+                    'content': prompt
+                }],
+                options={
+                    'temperature': 0.1,
+                    'top_p': 0.9,
+                    'num_predict': 4096,
+                    'num_ctx': 4096,
+                },
+                stream=False
+            )
+            
+            generated_text = response['message']['content'].strip()
+            print(f"Full model response: '{generated_text}'")
+            
+            # Handle DeepSeek-R1 thinking format - extract final answer after </think>
+            if '</think>' in generated_text:
+                # Complete thinking response
+                final_answer = generated_text.split('</think>')[-1].strip()
+            elif '<think>' in generated_text:
+                # Truncated thinking response - retry if we have attempts left
+                if attempt < max_attempts:
+                    print(f"Response truncated (has <think> but no </think>), retrying...")
+                    continue
+                else:
+                    print(f"Response still truncated after {max_attempts} attempts")
+                    final_answer = ""
+            else:
+                # No thinking format
+                final_answer = generated_text
+            
+            print(f"Extracted final answer: '{final_answer}'")
+            
+            # Parse the response for clear answers
+            if final_answer == self.positive_label:
+                return self.positive_label, 0.95
+            elif final_answer == self.negative_label:
+                return self.negative_label, 0.95
+            elif self.positive_label in final_answer and self.negative_label not in final_answer:
+                return self.positive_label, 0.85
+            elif self.negative_label in final_answer and self.positive_label not in final_answer:
+                return self.negative_label, 0.85
+            
+            # If we get here and have attempts left, something went wrong but let's try once more
+            if attempt < max_attempts:
+                print(f"Unclear response, retrying...")
+                continue
+            
+            # Final attempt failed - use probability resolution
+            print(f"Unclear response after {max_attempts} attempts: '{final_answer}' - checking probabilities...")
             return self._resolve_by_probability(prompt)
+        
+        # Should never reach here
+        raise RuntimeError("Failed to get clear response after all attempts")
     
     def _resolve_by_probability(self, prompt: str) -> tuple[str, float]:
         """When response is unclear, compare probabilities of each label."""
@@ -241,7 +252,7 @@ Paragraph: {paragraph}"""
                 options={
                     'temperature': 0.3,  # Some randomness for sampling
                     'top_p': 0.9,
-                    'num_predict': 10,  # Allow more tokens for thinking
+                    'num_predict': 100,  # Increased from 10 to allow thinking completion
                 }
             )
             
