@@ -11,8 +11,16 @@ Extract paragraphs containing social comparisons from text using a local languag
 ## Usage
 
 ```bash
-# Process with explanations (creates detailed_results.txt + raw_quotes.txt)
+# Continue latest run (or start from directory 0 if none exist)
 python main.py
+
+# Start fresh run in next available directory
+python main.py --restart
+python main.py -r
+
+# Use specific directory number (clears existing files)
+python main.py --directory 5
+python main.py -d 0
 
 # Simple mode - raw quotes only (faster)
 python main.py --simple
@@ -23,7 +31,32 @@ python main.py -v
 
 # Custom config
 python main.py --config my_config.json
+
+# Combine flags
+python main.py -d 3 -s -v -c thesis_config.json
 ```
+
+## Directory Management
+
+The script organizes results in numbered subdirectories:
+
+```
+output/
+├── 0/
+│   ├── raw_quotes.txt
+│   ├── detailed_results.txt
+│   └── progress.json
+├── 1/
+│   ├── raw_quotes.txt
+│   ├── detailed_results.txt
+│   └── progress.json
+└── 2/
+    └── ...
+```
+
+- **No flags**: Continue with highest numbered directory (or create `0/` if none exist)
+- **`-r/--restart`**: Create next available numbered directory
+- **`-d N/--directory N`**: Use directory `N` (clears existing files to restart)
 
 ## Configuration
 
@@ -37,13 +70,10 @@ Edit `sample_config.json` to change the model or prompts:
 }
 ```
 
-## Output
-
-- `./output/raw_quotes.txt` - Clean quotes: `"paragraph1"\n"paragraph2"`
-- `./output/detailed_results.txt` - Full results with explanations (unless `--simple`)
-
 ## Features
 
+- **Automatic Ollama startup** - Starts Ollama if not running
+- **Numbered run directories** - Organize multiple experimental runs
 - **Progress tracking** - Resume interrupted processing
 - **Real-time output** - See results as they're found
 - **Configurable** - Easy prompt and model customization
