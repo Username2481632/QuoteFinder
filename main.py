@@ -59,7 +59,7 @@ Respond with ONLY "0" if the paragraph does NOT contain clear self-comparison to
 You must respond with only the number 1 or 0, absolutely nothing else.
 
 Paragraph: {paragraph}"""
-    def load_progress(self) -> Dict:
+    def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
         try:
             if Path(self.progress_file).exists():
@@ -69,7 +69,7 @@ Paragraph: {paragraph}"""
             print(f"Warning: Could not load progress file: {e}")
         return {"last_paragraph": 0, "total_processed": 0, "total_found": 0}
     
-    def save_progress(self, progress: Dict):
+    def save_progress(self, progress: Dict[str, int]):
         """Save progress to JSON file."""
         try:
             with open(self.progress_file, 'w') as f:
@@ -170,17 +170,8 @@ Paragraph: {paragraph}"""
             
             # Try to get logprobs if available (newer Ollama versions)
             if 'eval_logprobs' in response or hasattr(response, 'logprobs'):
-                # Direct probability comparison approach
-                # We'll make two separate calls to get probabilities for each option
-                prob_1 = self._get_token_probability(prompt, "1")
-                prob_0 = self._get_token_probability(prompt, "0")
-                
-                if prob_1 > prob_0:
-                    confidence = prob_1 / (prob_1 + prob_0)
-                    return '1', confidence
-                else:
-                    confidence = prob_0 / (prob_1 + prob_0)
-                    return '0', confidence
+                # Use the probability-based approach
+                return self._query_model_with_probabilities(paragraph)
             else:
                 # Fallback to text parsing with simulated confidence
                 if '1' in generated_text:
@@ -200,9 +191,9 @@ Paragraph: {paragraph}"""
         Get model's preference between "1" and "0" by comparing their probabilities.
         This is more reliable than parsing text responses.
         """
+        prompt = self.prompt_template.format(paragraph=paragraph)
+        
         try:
-            prompt = self.prompt_template.format(paragraph=paragraph)
-            
             # Method 1: Compare probabilities by testing both completions
             prob_1 = self._evaluate_completion_likelihood(prompt, "1")
             prob_0 = self._evaluate_completion_likelihood(prompt, "0")
@@ -282,7 +273,7 @@ Paragraph: {paragraph}"""
             print(f"Error in fallback query: {e}")
             return '0', 0.0
 
-    def process_text_file(self, text_path: str = "huckleberry_finn.html") -> Dict:
+    def process_text_file(self, text_path: str = "huckleberry_finn.html") -> Dict[str, int]:
         """
         Process the text file and return results.
         
@@ -292,11 +283,11 @@ Paragraph: {paragraph}"""
         Returns:
             Dictionary with processing statistics
         """
-        text_path = Path(text_path)
-        if not text_path.exists():
-            raise FileNotFoundError(f"Text file not found: {text_path}")
+        text_file = Path(text_path)
+        if not text_file.exists():
+            raise FileNotFoundError(f"Text file not found: {text_file}")
 
-        print(f"Processing text file: {text_path}")
+        print(f"Processing text file: {text_file}")
         print(f"Using model: {self.model_name}")
         
         # Load progress
@@ -311,7 +302,7 @@ Paragraph: {paragraph}"""
         
         try:
             # Extract text from HTML
-            full_text = self._extract_text_from_html(text_path)
+            full_text = self._extract_text_from_html(str(text_file))
             
             # Split into paragraphs
             paragraphs = self._split_into_paragraphs(full_text)
