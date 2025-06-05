@@ -172,18 +172,25 @@ Paragraph: {paragraph}"""
         
         generated_text = response['message']['content'].strip()
         
+        # Handle DeepSeek-R1 thinking format - extract final answer after </think>
+        if '</think>' in generated_text:
+            # Get text after the thinking tags
+            final_answer = generated_text.split('</think>')[-1].strip()
+        else:
+            final_answer = generated_text
+        
         # Parse the response for clear answers
-        if generated_text == self.positive_label:
+        if final_answer == self.positive_label:
             return self.positive_label, 0.95
-        elif generated_text == self.negative_label:
+        elif final_answer == self.negative_label:
             return self.negative_label, 0.95
-        elif self.positive_label in generated_text and self.negative_label not in generated_text:
+        elif self.positive_label in final_answer and self.negative_label not in final_answer:
             return self.positive_label, 0.85
-        elif self.negative_label in generated_text and self.positive_label not in generated_text:
+        elif self.negative_label in final_answer and self.positive_label not in final_answer:
             return self.negative_label, 0.85
         else:
             # Unclear response - use probability comparison
-            print(f"Unclear response: '{generated_text}' - checking probabilities...")
+            print(f"Unclear response: '{final_answer}' - checking probabilities...")
             return self._resolve_by_probability(prompt)
     
     def _resolve_by_probability(self, prompt: str) -> tuple[str, float]:
@@ -219,12 +226,20 @@ Paragraph: {paragraph}"""
                 options={
                     'temperature': 0.3,  # Some randomness for sampling
                     'top_p': 0.9,
-                    'num_predict': 3,
+                    'num_predict': 10,  # Allow more tokens for thinking
                 }
             )
             
             generated = response['message']['content'].strip()
-            if label in generated:
+            
+            # Handle thinking format - extract final answer
+            if '</think>' in generated:
+                final_answer = generated.split('</think>')[-1].strip()
+            else:
+                final_answer = generated
+            
+            # Check if the label appears in the final answer
+            if label in final_answer:
                 matches += 1
         
         return matches / total_samples
