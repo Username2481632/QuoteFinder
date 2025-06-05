@@ -493,7 +493,7 @@ Text: "{text}" """
             print(f"Success rate: {total_found/total_processed*100:.1f}%")
         
         # Add completion summary to output file
-        with open(self.output_file, 'a', encoding='utf-8') as f:
+        with open(self.detailed_results_file, 'a', encoding='utf-8') as f:
             f.write("\n" + "=" * 50 + "\n")
             f.write("PROCESSING COMPLETE\n")
             f.write("=" * 50 + "\n")
