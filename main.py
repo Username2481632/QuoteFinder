@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Social Comparison Finder - Extract social comparison paragraphs from text using a local LLM
+Quote Finder - Extract social comparison paragraphs from text using a local LLM
 
 This script processes HTML/text files paragraph by paragraph, sends each paragraph
 to a local language model via Ollama, and logs paragraphs that show people
@@ -26,30 +26,35 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, model_name: str = "qwen3:4b", verbose: bool = False):
+    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False):
         """
         Initialize the Text Classifier.
         
         Args:
-            model_name: Name of the Ollama model to use
+            config_file: Path to the configuration JSON file
             verbose: Whether to show detailed debug output
         """
-        self.model_name = model_name
+        self.config = self._load_config(config_file)
+        self.model_name = self.config['model_name']
         self.verbose = verbose
-        self.prompt_template = self._get_classification_prompt()
+        self.prompt_template = self.config['classification_prompt']
+        self.explanation_prompt = self.config['explanation_prompt']
         self.progress_file = "progress.json"
         self.output_file = "results.txt"
         self.results_count = 0
         self.positive_label = "1"
         self.negative_label = "0"
         
-    def _get_classification_prompt(self) -> str:
-        """Get the classification prompt. This can be easily modified for different tasks."""
-        return """Does this text explicitly describe a character comparing themselves to another person in terms of abilities, traits, or status? The comparison must involve internal thoughts or feelings explicitly stated in the text. Titles, chapter headers, or general descriptions do not qualify.
-
-Respond with only "1" if such self-comparison is present, "0" if not.
-
-Text: "{paragraph}"""
+    def _load_config(self, config_file: str) -> Dict[str, str]:
+        """Load configuration from JSON file."""
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Configuration file '{config_file}' not found. Please create it or use the default 'sample_config.json'.")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
+        
     def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
         if Path(self.progress_file).exists():
@@ -404,12 +409,7 @@ Text: "{paragraph}"""
 
     def get_explanation(self, text: str) -> str:
         """Get a 1-sentence explanation for why this text contains social comparison."""
-        explanation_prompt = f"""This paragraph was identified as containing social comparison. 
-Provide a 1-sentence explanation of what specific social comparison is present.
-
-Paragraph: {text}
-
-Explanation:"""
+        explanation_prompt = self.explanation_prompt.format(text=text)
         
         try:
             response = ollama.chat(
@@ -465,28 +465,30 @@ def verify_model_available(model_name: str):
 def main():
     parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
+    parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
     args = parser.parse_args()
     
     print("Text Classifier")
     print("=" * 30)
     
+    # Initialize classifier with config file
+    classifier = TextClassifier(config_file=args.config, verbose=args.verbose)
+    
     # Check if model is available
-    model_name = "qwen3:4b"
-    verify_model_available(model_name)
+    verify_model_available(classifier.model_name)
     
     # Test the model
     if args.verbose:
         print("Trying test call to verify Ollama connection...")
     ollama.chat(
-        model=model_name, 
+        model=classifier.model_name, 
         messages=[{'role': 'user', 'content': 'test'}], 
         options={'num_predict': 1}
     )
     if args.verbose:
         print("Ollama connection successful!")
     
-    # Create classifier and process text file
-    classifier = TextClassifier(model_name=model_name, verbose=args.verbose)
+    # Process the text file
     classifier.process_text_file("huckleberry_finn.html")
     
     print(f"\nResults saved to: {classifier.output_file}")
