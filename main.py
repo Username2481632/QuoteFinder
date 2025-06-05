@@ -22,13 +22,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union
 from bs4 import BeautifulSoup
 import ollama
 
 
 class TextClassifier:
-    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False, restart: bool = False):
+    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False, restart: Union[None, bool, int] = None):
         """
         Initialize the Text Classifier.
         
@@ -36,7 +36,7 @@ class TextClassifier:
             config_file: Path to the configuration JSON file
             verbose: Whether to show detailed debug output
             simple: If True, only generate raw quotes without explanations
-            restart: If True, create a new numbered subdirectory
+            restart: None (use latest), True (create next), or int (use specific directory number)
         """
         self.config = self._load_config(config_file)
         self.model_name = self.config['model_name']
@@ -496,12 +496,19 @@ class TextClassifier:
 
     def _get_run_directory(self) -> Path:
         """Get the appropriate run directory (numbered subdirectory)."""
-        if self.restart:
+        existing_runs = [
+            int(d.name) for d in self.base_output_dir.iterdir() 
+            if d.is_dir() and d.name.isdigit()
+        ]
+        
+        if isinstance(self.restart, int):
+            # Use specific directory number
+            run_dir = self.base_output_dir / str(self.restart)
+            if self.verbose:
+                print(f"Using specified run directory: {run_dir}")
+            return run_dir
+        elif self.restart is True:
             # Create a new run directory with the next available number
-            existing_runs = [
-                int(d.name) for d in self.base_output_dir.iterdir() 
-                if d.is_dir() and d.name.isdigit()
-            ]
             next_run = max(existing_runs, default=-1) + 1
             run_dir = self.base_output_dir / str(next_run)
             if self.verbose:
@@ -509,10 +516,6 @@ class TextClassifier:
             return run_dir
         else:
             # Use the highest numbered existing directory, or create 0 if none exist
-            existing_runs = [
-                int(d.name) for d in self.base_output_dir.iterdir() 
-                if d.is_dir() and d.name.isdigit()
-            ]
             if existing_runs:
                 latest_run = max(existing_runs)
                 run_dir = self.base_output_dir / str(latest_run)
@@ -600,7 +603,8 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
     parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")
-    parser.add_argument("--restart", "-r", action="store_true", help="Start a new run in a new numbered subdirectory")
+    parser.add_argument("--restart", "-r", nargs="?", const=True, 
+                        help="Start a new run (with optional directory number: -r for next available, -r 5 for directory 5)")
     args = parser.parse_args()
     
     print("Text Classifier")
@@ -613,7 +617,19 @@ def main():
     
     # Initialize classifier with config file
     try:
-        classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple, restart=args.restart)
+        # Process restart argument: convert string to int if it's a number
+        restart_value = None
+        if args.restart is not None:
+            if args.restart is True:
+                restart_value = True
+            else:
+                try:
+                    restart_value = int(args.restart)
+                except ValueError:
+                    print(f"Error: --restart value '{args.restart}' must be a number or omitted")
+                    sys.exit(1)
+        
+        classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple, restart=restart_value)
     except (FileNotFoundError, ValueError) as e:
         print(f"Configuration Error: {e}")
         sys.exit(1)
