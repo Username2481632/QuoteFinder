@@ -26,7 +26,7 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, model_name: str = "deepseek-r1:1.5b", verbose: bool = False):
+    def __init__(self, model_name: str = "qwen3:4b", verbose: bool = False):
         """
         Initialize the Text Classifier.
         
@@ -45,17 +45,11 @@ class TextClassifier:
         
     def _get_classification_prompt(self) -> str:
         """Get the classification prompt. This can be easily modified for different tasks."""
-        return """Does this paragraph contain a character's internal thoughts where they compare themselves to another person?
-
-Look for thoughts like:
-- "I wish I was as smart as Sarah"
-- "He's so much better looking than me" 
-- "I felt inferior when I saw her success"
-- "Why can't I be more like him?"
+        return """Does this text explicitly describe a character comparing themselves to another person in terms of abilities, traits, or status? The comparison must involve internal thoughts or feelings explicitly stated in the text. Titles, chapter headers, or general descriptions do not qualify.
 
 Respond with only "1" if such self-comparison is present, "0" if not.
 
-Paragraph: {paragraph}"""
+Text: "{paragraph}"""
     def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
         if Path(self.progress_file).exists():
@@ -470,14 +464,14 @@ def verify_model_available(model_name: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
-    parser.add_argument("--verbose", action="store_true", help="Show detailed debug output")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     args = parser.parse_args()
     
     print("Text Classifier")
     print("=" * 30)
     
     # Check if model is available
-    model_name = "deepseek-r1:1.5b"
+    model_name = "qwen3:4b"
     verify_model_available(model_name)
     
     # Test the model
