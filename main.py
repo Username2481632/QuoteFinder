@@ -28,7 +28,7 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False):
+    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False, restart: bool = False):
         """
         Initialize the Text Classifier.
         
@@ -36,20 +36,26 @@ class TextClassifier:
             config_file: Path to the configuration JSON file
             verbose: Whether to show detailed debug output
             simple: If True, only generate raw quotes without explanations
+            restart: If True, create a new numbered subdirectory
         """
         self.config = self._load_config(config_file)
         self.model_name = self.config['model_name']
         self.verbose = verbose
         self.simple = simple
+        self.restart = restart
         self.prompt_template = self.config['classification_prompt']
         self.explanation_prompt = self.config['explanation_prompt']
-        self.progress_file = "progress.json"
         
-        # Create output directory
-        self.output_dir = Path("output")
+        # Create main output directory
+        self.base_output_dir = Path("output")
+        self.base_output_dir.mkdir(exist_ok=True)
+        
+        # Determine the run directory
+        self.output_dir = self._get_run_directory()
         self.output_dir.mkdir(exist_ok=True)
         
-        # Set output files
+        # Set output files (all within the run directory)
+        self.progress_file = self.output_dir / "progress.json"
         self.raw_quotes_file = self.output_dir / "raw_quotes.txt"
         self.detailed_results_file = self.output_dir / "detailed_results.txt"
         
@@ -69,7 +75,7 @@ class TextClassifier:
         
     def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
-        if Path(self.progress_file).exists():
+        if self.progress_file.exists():
             with open(self.progress_file, 'r') as f:
                 return json.load(f)
         return {"last_paragraph": 0, "total_processed": 0, "total_found": 0}
@@ -409,7 +415,7 @@ class TextClassifier:
                 f.write(f"Success rate: {total_found/total_processed*100:.1f}%\n")
         
         # Clear progress file on completion
-        Path(self.progress_file).unlink(missing_ok=True)
+        self.progress_file.unlink(missing_ok=True)
         
         return progress
 
@@ -473,6 +479,38 @@ class TextClassifier:
             if self.verbose:
                 print(f"Error getting explanation: {e}")
             return "Social comparison detected."
+
+    def _get_run_directory(self) -> Path:
+        """Get the appropriate run directory (numbered subdirectory)."""
+        if self.restart:
+            # Create a new run directory with the next available number
+            existing_runs = [
+                int(d.name) for d in self.base_output_dir.iterdir() 
+                if d.is_dir() and d.name.isdigit()
+            ]
+            next_run = max(existing_runs, default=-1) + 1
+            run_dir = self.base_output_dir / str(next_run)
+            if self.verbose:
+                print(f"Creating new run directory: {run_dir}")
+            return run_dir
+        else:
+            # Use the highest numbered existing directory, or create 0 if none exist
+            existing_runs = [
+                int(d.name) for d in self.base_output_dir.iterdir() 
+                if d.is_dir() and d.name.isdigit()
+            ]
+            if existing_runs:
+                latest_run = max(existing_runs)
+                run_dir = self.base_output_dir / str(latest_run)
+                if self.verbose:
+                    print(f"Continuing with existing run directory: {run_dir}")
+                return run_dir
+            else:
+                # No existing runs, create directory 0
+                run_dir = self.base_output_dir / "0"
+                if self.verbose:
+                    print(f"Creating initial run directory: {run_dir}")
+                return run_dir
 
 def verify_model_available(model_name: str):
     """Verify that the specified model is available in Ollama."""
@@ -548,6 +586,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
     parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")
+    parser.add_argument("--restart", "-r", action="store_true", help="Start a new run in a new numbered subdirectory")
     args = parser.parse_args()
     
     print("Text Classifier")
@@ -559,7 +598,7 @@ def main():
         sys.exit(1)
     
     # Initialize classifier with config file
-    classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple)
+    classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple, restart=args.restart)
     
     # Check if model is available
     verify_model_available(classifier.model_name)
