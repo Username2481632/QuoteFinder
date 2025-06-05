@@ -18,7 +18,9 @@ Usage:
 import argparse
 import json
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import List, Tuple, Dict
 from bs4 import BeautifulSoup
@@ -487,6 +489,60 @@ def verify_model_available(model_name: str):
     print(f"Using model: {model_name}")
 
 
+def is_ollama_running() -> bool:
+    """Check if Ollama is currently running by trying to connect."""
+    try:
+        ollama.list()
+        return True
+    except Exception:
+        return False
+
+def start_ollama(verbose: bool = False) -> bool:
+    """Start Ollama if it's not running. Returns True if successful."""
+    if is_ollama_running():
+        if verbose:
+            print("Ollama is already running.")
+        return True
+    
+    if verbose:
+        print("Ollama is not running. Attempting to start it...")
+    
+    try:
+        # Try to start Ollama as a background process
+        if sys.platform.startswith('win'):
+            # Windows
+            subprocess.Popen(['ollama', 'serve'], creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+        else:
+            # Unix-like systems (Mac, Linux)
+            subprocess.Popen(['ollama', 'serve'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Wait a bit for Ollama to start
+        if verbose:
+            print("Waiting for Ollama to start...")
+        
+        for i in range(10):  # Wait up to 10 seconds
+            time.sleep(1)
+            if is_ollama_running():
+                if verbose:
+                    print("Ollama started successfully!")
+                return True
+            if verbose:
+                print(f"Still waiting... ({i+1}/10)")
+        
+        if verbose:
+            print("Timeout waiting for Ollama to start.")
+        return False
+        
+    except FileNotFoundError:
+        if verbose:
+            print("Error: 'ollama' command not found. Please install Ollama first.")
+        return False
+    except Exception as e:
+        if verbose:
+            print(f"Error starting Ollama: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
@@ -497,22 +553,32 @@ def main():
     print("Text Classifier")
     print("=" * 30)
     
+    # Start Ollama if it's not running
+    if not start_ollama(verbose=args.verbose):
+        print("Error: Could not start Ollama. Please make sure Ollama is installed and try running 'ollama serve' manually.")
+        sys.exit(1)
+    
     # Initialize classifier with config file
     classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple)
     
     # Check if model is available
     verify_model_available(classifier.model_name)
     
-    # Test the model
+    # Test the model connection
     if args.verbose:
-        print("Trying test call to verify Ollama connection...")
-    ollama.chat(
-        model=classifier.model_name, 
-        messages=[{'role': 'user', 'content': 'test'}], 
-        options={'num_predict': 1}
-    )
-    if args.verbose:
-        print("Ollama connection successful!")
+        print("Testing Ollama connection...")
+    try:
+        ollama.chat(
+            model=classifier.model_name, 
+            messages=[{'role': 'user', 'content': 'test'}], 
+            options={'num_predict': 1}
+        )
+        if args.verbose:
+            print("Ollama connection successful!")
+    except Exception as e:
+        print(f"Error connecting to Ollama: {e}")
+        print("Please check that Ollama is running and the model is available.")
+        sys.exit(1)
     
     # Process the text file
     classifier.process_text_file("huckleberry_finn.html")
