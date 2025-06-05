@@ -452,7 +452,7 @@ Text: "{text}" """
                         
                         if response == '1':
                             total_found += 1
-                            self.append_result(paragraph_num, paragraphs[paragraph_num - 1], confidence, explanation)
+                            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
                             result_status = f"● found (conf: {confidence:.2f})"
                         else:
                             result_status = f"○ skip (conf: {confidence:.2f})"
