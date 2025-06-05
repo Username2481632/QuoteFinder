@@ -89,13 +89,22 @@ Paragraph: {paragraph}"""
                 f.write("Social Comparison Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
         
+        # Get explanation for this finding
+        if self.verbose:
+            print("Getting explanation...")
+        explanation = self.get_explanation(text)
+        
         with open(self.output_file, 'a', encoding='utf-8') as f:
             self.results_count += 1
             f.write(f"Finding #{self.results_count} (Paragraph {paragraph_num}, Confidence: {confidence:.2f})\n")
             f.write("-" * 60 + "\n")
+            f.write(f"Explanation: {explanation}\n\n")
             f.write(f"{text}\n\n")
         
-        print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - Saved to {self.output_file}")
+        if self.verbose:
+            print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - {explanation}")
+        else:
+            print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - Saved to {self.output_file}")
 
     def _extract_text_from_html(self, html_path: str) -> str:
         """Extract clean text from HTML file."""
@@ -407,6 +416,50 @@ Paragraph: {paragraph}"""
             if current == total:
                 print()  # Final newline
 
+    def get_explanation(self, text: str) -> str:
+        """Get a 1-sentence explanation for why this text contains social comparison."""
+        explanation_prompt = f"""This paragraph was identified as containing social comparison. 
+Provide a 1-sentence explanation of what specific social comparison is present.
+
+Paragraph: {text}
+
+Explanation:"""
+        
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[{
+                    'role': 'user',
+                    'content': explanation_prompt
+                }],
+                options={
+                    'temperature': 0.3,
+                    'top_p': 0.9,
+                    'num_predict': 100,  # Keep it short
+                    'num_ctx': 4096,
+                },
+                stream=False
+            )
+            
+            explanation = response['message']['content'].strip()
+            
+            # Handle thinking format if present
+            if '</think>' in explanation:
+                explanation = explanation.split('</think>')[-1].strip()
+            elif '<think>' in explanation:
+                # If truncated, just use what we have after <think>
+                explanation = explanation.replace('<think>', '').strip()
+            
+            # Ensure it's a single sentence (take first sentence if multiple)
+            if '.' in explanation:
+                explanation = explanation.split('.')[0] + '.'
+            
+            return explanation if explanation else "Social comparison detected."
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"Error getting explanation: {e}")
+            return "Social comparison detected."
 
 def verify_model_available(model_name: str):
     """Verify that the specified model is available in Ollama."""
