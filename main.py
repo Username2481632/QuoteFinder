@@ -46,8 +46,8 @@ class TextClassifier:
         self.simple = simple
         self.restart = restart
         self.directory = directory
-        self.prompt_template = self.config['classification_prompt']
-        self.classification_prompt = self.config['classification_prompt']
+        self.prompt_template = self.config['search_criteria']
+        self.search_criteria = self.config['search_criteria']
         
         # Create main output directory
         self.base_output_dir = Path("output")
@@ -77,7 +77,7 @@ class TextClassifier:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
         
         # Validate required fields
-        required_fields = ['model_name', 'target_file', 'classification_prompt']
+        required_fields = ['model_name', 'target_file', 'search_criteria']
         missing_fields = [field for field in required_fields if field not in config]
         
         if missing_fields:
@@ -232,16 +232,11 @@ class TextClassifier:
     def classify_text(self, text: str) -> tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build full prompt from the classification description
-        combined_prompt = f"""Does this text match the following criteria: {self.classification_prompt}
-
-Look for clear internal thoughts or dialogue where someone:
-- Thinks about how they measure up to others
-- Compares their abilities, morals, or status to others
-- Changes their behavior based on comparison to others
-- Feels better/worse about themselves after comparing to others
-
-Ignore: Pure action, description, dialogue without self-comparison, chapter titles.
-
+        combined_prompt = f"""Does this text match the following criteria:
+```
+{self.search_criteria}
+```
+Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.
 If you answer "1", provide a brief 1-sentence explanation of what comparison you found.
 If you answer "0", just respond with "0".
 

@@ -69,14 +69,13 @@ output/
 
 ## Configuration
 
-Configuration files specify the model, target file, and analysis prompts:
+Configuration files specify the model, target file, and search criteria:
 
 ```json
 {
   "model_name": "qwen3:4b",
   "target_file": "huckleberry_finn.html",
-  "classification_prompt": "Your analysis prompt here...",
-  "explanation_prompt": "Your explanation prompt here..."
+  "search_criteria": "Your search description here..."
 }
 ```
 
@@ -88,8 +87,7 @@ The included `sample_config.json` provides a starting template:
 {
   "model_name": "qwen3:4b",
   "target_file": "huckleberry_finn.html",
-  "classification_prompt": "Your analysis prompt here...",
-  "explanation_prompt": "Your explanation prompt here..."
+  "search_criteria": "explicit description of a character comparing themselves to another person"
 }
 ```
 
@@ -97,7 +95,7 @@ The included `sample_config.json` provides a starting template:
 
 1. Copy `sample_config.json` to a new file (e.g., `my_analysis.json`)
 2. Update `target_file` to point to your text file 
-3. Modify prompts for your specific analysis needs
+3. Modify `search_criteria` to describe what you're looking for
 4. Ensure your target file is in the project directory
 
 ### File Types Supported:

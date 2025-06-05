@@ -1,5 +1,5 @@
 {
   "model_name": "qwen3:4b",
   "target_file": "huckleberry_finn.html",
-  "classification_prompt": "explicit description of a character comparing themselves to another person"
+  "search_criteria": "explicit description of a character comparing themselves to another person"
 }
