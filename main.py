@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Union
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import ollama
 
@@ -254,6 +255,7 @@ class TextClassifier:
                     'top_p': 0.9,
                     'num_predict': 4096,
                     'num_ctx': 4096,
+                    'keep_alive': '10m'
                 },
                 stream=False
             )
@@ -340,7 +342,8 @@ class TextClassifier:
                 options={
                     'temperature': 0.3,  # Some randomness for sampling
                     'top_p': 0.9,
-                    'num_predict': 100,  # Increased from 10 to allow thinking completion
+                    'num_predict': 4096,  # Allow reasoning like deepseek-r1
+                    'keep_alive': '10m'
                 }
             )
             
@@ -408,43 +411,62 @@ class TextClassifier:
             
             total_paragraphs = len(paragraphs)
             
+            # Prepare paragraph data for batch processing
+            remaining_paragraphs = [(i, paragraph) for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph)]
+            batch_size = 4  # Process 4 paragraphs in parallel
+            
             if self.verbose:
                 print(f"Total {content_type} to process: {total_paragraphs}")
                 print(f"Starting from {content_type[:-1]}: {start_paragraph + 1}")
+                print(f"Using batch processing with {batch_size} parallel workers")
             else:
                 print(f"Processing {total_paragraphs} {content_type}...")
             
-            for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph):
-                paragraph_num = i + 1
+            # Process in batches
+            for batch_start in range(0, len(remaining_paragraphs), batch_size):
+                batch_end = min(batch_start + batch_size, len(remaining_paragraphs))
+                batch_data = remaining_paragraphs[batch_start:batch_end]
                 
                 if self.verbose:
-                    print(f"Processing {content_type[:-1]} {paragraph_num}/{total_paragraphs}: ", end="", flush=True)
+                    print(f"\nProcessing batch {batch_start//batch_size + 1}/{(len(remaining_paragraphs) + batch_size - 1)//batch_size}")
                 
-                # Query the model
-                response, confidence = self.classify_text(paragraph)
-                
-                total_processed += 1
-                
-                if response == '1':
-                    total_found += 1
-                    self.append_result(paragraph_num, paragraph, confidence)
-                    result_status = f"● found (conf: {confidence:.2f})"
-                else:
-                    result_status = f"○ skip (conf: {confidence:.2f})"
-                
-                if self.verbose:
-                    print(result_status)
-                else:
-                    # Update progress bar with result
-                    self._update_progress(total_processed, total_paragraphs, result_status)
-                
-                # Save progress after each paragraph
-                progress = {
-                    "last_paragraph": i + 1,
-                    "total_processed": total_processed,
-                    "total_found": total_found
-                }
-                self.save_progress(progress)
+                try:
+                    # Process batch in parallel
+                    batch_results = self._process_paragraph_batch(batch_data, batch_size)
+                    
+                    # Handle results
+                    for paragraph_num, response, confidence, _ in batch_results:
+                        total_processed += 1
+                        
+                        if response == '1':
+                            total_found += 1
+                            self.append_result(paragraph_num, paragraphs[paragraph_num - 1], confidence)
+                            result_status = f"● found (conf: {confidence:.2f})"
+                        else:
+                            result_status = f"○ skip (conf: {confidence:.2f})"
+                        
+                        if self.verbose:
+                            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {result_status}")
+                        else:
+                            # Update progress bar with result
+                            self._update_progress(total_processed, total_paragraphs, result_status)
+                        
+                        # Save progress after each paragraph
+                        progress = {
+                            "last_paragraph": paragraph_num,
+                            "total_processed": total_processed,
+                            "total_found": total_found
+                        }
+                        self.save_progress(progress)
+                        
+                except KeyboardInterrupt:
+                    print(f"\n\nProcessing interrupted by user.")
+                    print(f"Progress saved. Resume by running the script again.")
+                    return {
+                        "last_paragraph": total_processed + start_paragraph,
+                        "total_processed": total_processed,
+                        "total_found": total_found
+                    }
                 
         except KeyboardInterrupt:
             print(f"\n\nProcessing interrupted by user.")
@@ -512,6 +534,7 @@ class TextClassifier:
                     'top_p': 0.9,
                     'num_predict': 4096,  # Allow full thinking process
                     'num_ctx': 4096,
+                    'keep_alive': '10m'
                 },
                 stream=False
             )
@@ -581,6 +604,51 @@ class TextClassifier:
                 if self.verbose:
                     print(f"Creating initial run directory: {run_dir}")
                 return run_dir
+
+    def _process_paragraph_batch(self, paragraph_data: List[Tuple[int, str]], batch_size: int = 4) -> List[Tuple[int, str, float, str]]:
+        """Process a batch of paragraphs in parallel."""
+        results = []
+        
+        def process_single_paragraph(paragraph_info):
+            paragraph_num, paragraph = paragraph_info
+            try:
+                response, confidence = self.classify_text(paragraph)
+                if response == '1' and not self.simple:
+                    explanation = self.get_explanation(paragraph)
+                else:
+                    explanation = ""
+                return (paragraph_num, response, confidence, explanation)
+            except Exception as e:
+                if self.verbose:
+                    print(f"\nError processing paragraph {paragraph_num}: {e}")
+                return (paragraph_num, '0', 0.0, "")
+        
+        # Process in batches to avoid overwhelming the model
+        for i in range(0, len(paragraph_data), batch_size):
+            batch = paragraph_data[i:i + batch_size]
+            
+            with ThreadPoolExecutor(max_workers=min(batch_size, 4)) as executor:
+                # Submit all tasks in the batch
+                future_to_paragraph = {
+                    executor.submit(process_single_paragraph, para_info): para_info
+                    for para_info in batch
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_paragraph):
+                    paragraph_info = future_to_paragraph[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        paragraph_num = paragraph_info[0]
+                        if self.verbose:
+                            print(f"\nError in batch processing for paragraph {paragraph_num}: {e}")
+                        results.append((paragraph_num, '0', 0.0, ""))
+        
+        # Sort results by paragraph number to maintain order
+        results.sort(key=lambda x: x[0])
+        return results
 
 def verify_model_available(model_name: str):
     """Verify that the specified model is available in Ollama."""
