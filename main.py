@@ -76,7 +76,7 @@ class TextClassifier:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
         
         # Validate required fields
-        required_fields = ['model_name', 'classification_prompt', 'explanation_prompt']
+        required_fields = ['model_name', 'target_file', 'classification_prompt', 'explanation_prompt']
         missing_fields = [field for field in required_fields if field not in config]
         
         if missing_fields:
@@ -204,6 +204,34 @@ class TextClassifier:
         
         return cleaned_paragraphs
 
+    def _extract_text_from_txt(self, file_path: str) -> str:
+        """Extract text from a TXT file."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    
+    def _split_txt_into_stanzas(self, text: str) -> List[str]:
+        """Split TXT content into stanzas (groups of lines separated by blank lines)."""
+        # Split by double newlines to get stanzas
+        potential_stanzas = re.split(r'\n\s*\n', text)
+        
+        stanzas = []
+        for stanza in potential_stanzas:
+            # Clean up the stanza
+            cleaned = stanza.strip()
+            
+            # Skip very short stanzas (likely headers or artifacts)
+            if len(cleaned) < 50:
+                continue
+                
+            # Skip if it looks like a title or header (all caps, short lines)
+            lines = cleaned.split('\n')
+            if len(lines) <= 2 and any(line.isupper() for line in lines if len(line.strip()) > 0):
+                continue
+                
+            stanzas.append(cleaned)
+        
+        return stanzas
+
     def classify_text(self, text: str) -> tuple[str, float]:
         """Classify text and return label with confidence."""
         prompt = self.prompt_template.format(paragraph=text)
@@ -330,16 +358,19 @@ class TextClassifier:
         
         return matches / total_samples
 
-    def process_text_file(self, text_path: str = "huckleberry_finn.html") -> Dict[str, int]:
+    def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, int]:
         """
         Process the text file and return results.
         
         Args:
-            text_path: Path to the HTML text file
+            text_path: Path to the text file (if None, uses target_file from config)
             
         Returns:
             Dictionary with processing statistics
         """
+        if text_path is None:
+            text_path = self.config['target_file']
+            
         text_file = Path(text_path)
         if not text_file.exists():
             raise FileNotFoundError(f"Text file not found: {text_file}")
@@ -361,24 +392,33 @@ class TextClassifier:
         self._create_output_file_header()
         
         try:
-            # Extract text from HTML
-            full_text = self._extract_text_from_html(str(text_file))
+            # Determine file type and extract content accordingly
+            file_extension = text_file.suffix.lower()
             
-            # Split into paragraphs
-            paragraphs = self._split_into_paragraphs(full_text)
+            if file_extension == '.html':
+                full_text = self._extract_text_from_html(str(text_file))
+                paragraphs = self._split_into_paragraphs(full_text)
+                content_type = "paragraphs"
+            elif file_extension == '.txt':
+                full_text = self._extract_text_from_txt(str(text_file))
+                paragraphs = self._split_txt_into_stanzas(full_text)
+                content_type = "stanzas"
+            else:
+                raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .html, .txt")
+            
             total_paragraphs = len(paragraphs)
             
             if self.verbose:
-                print(f"Total paragraphs to process: {total_paragraphs}")
-                print(f"Starting from paragraph: {start_paragraph + 1}")
+                print(f"Total {content_type} to process: {total_paragraphs}")
+                print(f"Starting from {content_type[:-1]}: {start_paragraph + 1}")
             else:
-                print(f"Processing {total_paragraphs} paragraphs...")
+                print(f"Processing {total_paragraphs} {content_type}...")
             
             for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph):
                 paragraph_num = i + 1
                 
                 if self.verbose:
-                    print(f"Processing paragraph {paragraph_num}/{total_paragraphs}: ", end="", flush=True)
+                    print(f"Processing {content_type[:-1]} {paragraph_num}/{total_paragraphs}: ", end="", flush=True)
                 
                 # Query the model
                 response, confidence = self.classify_text(paragraph)
@@ -661,7 +701,7 @@ def main():
         sys.exit(1)
     
     # Process the text file
-    classifier.process_text_file("huckleberry_finn.html")
+    classifier.process_text_file()
     
     print(f"\nResults saved to: {classifier.output_dir}")
     if args.simple:

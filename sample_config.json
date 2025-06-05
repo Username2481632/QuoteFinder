@@ -1,5 +1,6 @@
 {
   "model_name": "qwen3:4b",
+  "target_file": "huckleberry_finn.html",
   "classification_prompt": "Does this text explicitly describe a character comparing themselves to another person in terms of abilities, traits, or status? The comparison must involve internal thoughts or feelings explicitly stated in the text. Titles, chapter headers, or general descriptions do not qualify.\n\nRespond with only \"1\" if such self-comparison is present, \"0\" if not.\n\nText: \"{paragraph}\"",
   "explanation_prompt": "This paragraph contains social comparison. Provide a 1-sentence explanation of what specific social comparison is present.\n\nParagraph: {text}\n\nExplanation:"
 }
