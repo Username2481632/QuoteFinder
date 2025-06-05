@@ -45,15 +45,15 @@ class TextClassifier:
         
     def _get_classification_prompt(self) -> str:
         """Get the classification prompt. This can be easily modified for different tasks."""
-        return """Does this paragraph contain someone comparing themselves to another person?
+        return """Does this paragraph contain a character's internal thoughts where they compare themselves to another person?
 
-Examples of social comparison:
+Look for thoughts like:
 - "I wish I was as smart as Sarah"
-- "He's so much better looking than me"
+- "He's so much better looking than me" 
 - "I felt inferior when I saw her success"
 - "Why can't I be more like him?"
 
-Respond with only "1" if social comparison is present, "0" if not.
+Respond with only "1" if such self-comparison is present, "0" if not.
 
 Paragraph: {paragraph}"""
     def load_progress(self) -> Dict[str, int]:
