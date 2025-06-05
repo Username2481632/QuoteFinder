@@ -567,11 +567,21 @@ class TextClassifier:
         ]
         
         if self.directory is not None:
-            # Use specific directory number - always start fresh
+            # Use specific directory number
             run_dir = self.base_output_dir / str(self.directory)
             if self.verbose:
-                print(f"Using specified run directory (will restart): {run_dir}")
-            # Clear any existing files for this directory to start fresh
+                action = "clearing and using" if self.restart else "using"
+                print(f"Directory specified: {action} {run_dir}")
+        else:
+            # Default: create next available directory
+            next_run = max(existing_runs, default=-1) + 1
+            run_dir = self.base_output_dir / str(next_run)
+            if self.verbose:
+                action = "clearing and creating" if self.restart else "creating"
+                print(f"No directory specified: {action} new directory {run_dir}")
+        
+        # Clear files if restart flag is set
+        if self.restart:
             if run_dir.exists():
                 progress_file = run_dir / "progress.json"
                 raw_quotes_file = run_dir / "raw_quotes.txt"
@@ -582,28 +592,10 @@ class TextClassifier:
                         file_to_clear.unlink()
                         if self.verbose:
                             print(f"Cleared existing file: {file_to_clear}")
-            return run_dir
-        elif self.restart:
-            # Create a new run directory with the next available number
-            next_run = max(existing_runs, default=-1) + 1
-            run_dir = self.base_output_dir / str(next_run)
-            if self.verbose:
-                print(f"Creating new run directory: {run_dir}")
-            return run_dir
-        else:
-            # Use the highest numbered existing directory, or create 0 if none exist
-            if existing_runs:
-                latest_run = max(existing_runs)
-                run_dir = self.base_output_dir / str(latest_run)
-                if self.verbose:
-                    print(f"Continuing with existing run directory: {run_dir}")
-                return run_dir
-            else:
-                # No existing runs, create directory 0
-                run_dir = self.base_output_dir / "0"
-                if self.verbose:
-                    print(f"Creating initial run directory: {run_dir}")
-                return run_dir
+            elif self.verbose:
+                print(f"No existing files to clear in {run_dir}")
+        
+        return run_dir
 
     def _process_paragraph_batch(self, paragraph_data: List[Tuple[int, str]], batch_size: int = 4) -> List[Tuple[int, str, float, str]]:
         """Process a batch of paragraphs in parallel."""
@@ -724,7 +716,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
     parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")
-    parser.add_argument("--restart", "-r", action="store_true", help="Start a new run (clears progress and creates next numbered directory)")
+    parser.add_argument("--restart", "-r", action="store_true", help="Clear files in the specified directory (use with -d)")
     parser.add_argument("--directory", "-d", type=int, help="Use specific directory number (e.g., -d 5 for output/5/)")
     args = parser.parse_args()
     

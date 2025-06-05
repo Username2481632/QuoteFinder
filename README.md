@@ -11,16 +11,16 @@ Extract paragraphs containing social comparisons from text using a local languag
 ## Usage
 
 ```bash
-# Continue latest run (or start from directory 0 if none exist)
+# Create new directory with next available number (default)
 python main.py
 
-# Start fresh run in next available directory
-python main.py --restart
-python main.py -r
-
-# Use specific directory number (clears existing files)
+# Use specific directory number (keeps existing files)
 python main.py --directory 5
 python main.py -d 0
+
+# Clear files in specific directory and restart
+python main.py --directory 5 --restart
+python main.py -d 0 -r
 
 # Use different configuration files
 python main.py -c sample_config.json      # Default configuration
@@ -34,7 +34,7 @@ python main.py -s
 python main.py -v
 
 # Combine flags
-python main.py -d 3 -s -v -c sample_config.json
+python main.py -d 3 -r -s -v -c sample_config.json
 ```
 
 ## File Format Support
@@ -62,9 +62,10 @@ output/
     └── ...
 ```
 
-- **No flags**: Continue with highest numbered directory (or create `0/` if none exist)
-- **`-r/--restart`**: Create next available numbered directory
-- **`-d N/--directory N`**: Use directory `N` (clears existing files to restart)
+- **No flags**: Create next available numbered directory (e.g., if 0,1,2 exist, creates 3)
+- **`-d N/--directory N`**: Use directory `N` (keeps existing files)
+- **`-r/--restart`**: Clear files in whichever directory gets used (requires `-d`)
+- **`-d N -r`**: Use directory `N` and clear existing files to restart fresh
 
 ## Configuration
 
