@@ -95,8 +95,9 @@ The included `sample_config.json` provides a starting template:
 
 1. Copy `sample_config.json` to a new file (e.g., `my_analysis.json`)
 2. Update `target_file` to point to your text file 
-3. Modify `search_criteria` to describe what you're looking for
-4. Ensure your target file is in the project directory
+3. Update `model_name` if you want to use a different model
+4. Modify `search_criteria` to describe what you're looking for
+5. Ensure your target file is in the project directory
 
 ### File Types Supported:
 - **HTML files** (`.html`): Split into paragraphs for prose analysis
@@ -110,4 +111,6 @@ The included `sample_config.json` provides a starting template:
 - **Progress tracking** - Resume interrupted processing
 - **Real-time output** - See results as they're found
 - **Configurable** - Easy prompt and model customization
+- **Performance optimized** - Model keep-alive and parallel batch processing
+- **Combined analysis** - Classification and explanation in single model call
 - **Cross-platform** - Works on Windows, Mac, Linux
