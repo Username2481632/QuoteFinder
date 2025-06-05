@@ -327,18 +327,10 @@ def verify_model_available(model_name: str):
     """Verify that the specified model is available in Ollama."""
     models_response = ollama.list()
     
-    if not isinstance(models_response, dict) or 'models' not in models_response:
-        raise RuntimeError(f"Invalid response from Ollama: {models_response}")
+    # Extract model names from the response
+    model_names = [model.model for model in models_response.models]
     
-    # Extract model names - handle both 'name' and 'model' fields
-    model_names = []
-    for model in models_response['models']:
-        # Try 'model' field first (what we see in the response), then 'name'
-        model_name_field = getattr(model, 'model', None) or model.get('model', '') or model.get('name', '')
-        if model_name_field:
-            model_names.append(model_name_field)
-    
-    print(f"Available models: {model_names}")  # Debug output
+    print(f"Available models: {model_names}")
     
     if model_name not in model_names:
         raise ValueError(f"Model '{model_name}' not found. Available models: {', '.join(model_names)}. Run: ollama pull {model_name}")
