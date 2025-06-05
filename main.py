@@ -47,7 +47,7 @@ class TextClassifier:
         self.restart = restart
         self.directory = directory
         self.prompt_template = self.config['classification_prompt']
-        self.explanation_prompt = self.config['explanation_prompt']
+        self.classification_prompt = self.config['classification_prompt']
         
         # Create main output directory
         self.base_output_dir = Path("output")
@@ -77,7 +77,7 @@ class TextClassifier:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
         
         # Validate required fields
-        required_fields = ['model_name', 'target_file', 'classification_prompt', 'explanation_prompt']
+        required_fields = ['model_name', 'target_file', 'classification_prompt']
         missing_fields = [field for field in required_fields if field not in config]
         
         if missing_fields:
@@ -115,7 +115,7 @@ class TextClassifier:
                 f.write("Social Comparison Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
     
-    def append_result(self, paragraph_num: int, text: str, confidence: float):
+    def append_result(self, paragraph_num: int, text: str, confidence: float, explanation: str = ""):
         """Append a result immediately to the output files."""
         # Create headers if this is the first result
         if self.results_count == 0:
@@ -128,11 +128,7 @@ class TextClassifier:
             f.write(f'"{text}"\n')
         
         # Write to detailed results file only if not in simple mode
-        explanation = None
-        if not self.simple:
-            # Get explanation for this finding (quietly)
-            explanation = self.get_explanation(text)
-            
+        if not self.simple and explanation:
             with open(self.detailed_results_file, 'a', encoding='utf-8') as f:
                 f.write(f"Finding #{self.results_count} (Paragraph {paragraph_num}, Confidence: {confidence:.2f})\n")
                 f.write("-" * 60 + "\n")
@@ -233,9 +229,25 @@ class TextClassifier:
         
         return stanzas
 
-    def classify_text(self, text: str) -> tuple[str, float]:
-        """Classify text and return label with confidence."""
-        prompt = self.prompt_template.format(paragraph=text)
+    def classify_text(self, text: str) -> tuple[str, float, str]:
+        """Classify text and return label with confidence and explanation."""
+        # Build full prompt from the classification description
+        combined_prompt = f"""Does this text match the following criteria: {self.classification_prompt}
+
+Look for clear internal thoughts or dialogue where someone:
+- Thinks about how they measure up to others
+- Compares their abilities, morals, or status to others
+- Changes their behavior based on comparison to others
+- Feels better/worse about themselves after comparing to others
+
+Ignore: Pure action, description, dialogue without self-comparison, chapter titles.
+
+If you answer "1", provide a brief 1-sentence explanation of what comparison you found.
+If you answer "0", just respond with "0".
+
+Format: Either "0" or "1: [explanation]"
+
+Text: "{text}" """
         
         # Try up to 3 times with same token limit
         max_attempts = 3
@@ -248,7 +260,7 @@ class TextClassifier:
                 model=self.model_name,
                 messages=[{
                     'role': 'user',
-                    'content': prompt
+                    'content': combined_prompt
                 }],
                 options={
                     'temperature': 0.1,
@@ -286,14 +298,17 @@ class TextClassifier:
                 print(f"Extracted final answer: '{final_answer}'")
             
             # Parse the response for clear answers
-            if final_answer == self.positive_label:
-                return self.positive_label, 0.95
+            if final_answer.startswith('1:'):
+                explanation = final_answer[2:].strip()
+                return self.positive_label, 0.95, explanation
+            elif final_answer == self.positive_label:
+                return self.positive_label, 0.95, "Social comparison detected."
             elif final_answer == self.negative_label:
-                return self.negative_label, 0.95
+                return self.negative_label, 0.95, ""
             elif self.positive_label in final_answer and self.negative_label not in final_answer:
-                return self.positive_label, 0.85
+                return self.positive_label, 0.85, "Social comparison detected."
             elif self.negative_label in final_answer and self.positive_label not in final_answer:
-                return self.negative_label, 0.85
+                return self.negative_label, 0.85, ""
             
             # If we get here and have attempts left, something went wrong but let's try once more
             if attempt < max_attempts:
@@ -304,12 +319,12 @@ class TextClassifier:
             # Final attempt failed - use probability resolution
             if self.verbose:
                 print(f"Unclear response after {max_attempts} attempts: '{final_answer}' - checking probabilities...")
-            return self._resolve_by_probability(prompt)
+            return self._resolve_by_probability(combined_prompt)
         
         # Should never reach here
         raise RuntimeError("Failed to get clear response after all attempts")
     
-    def _resolve_by_probability(self, prompt: str) -> tuple[str, float]:
+    def _resolve_by_probability(self, prompt: str) -> tuple[str, float, str]:
         """When response is unclear, compare probabilities of each label."""
         prob_positive = self._get_label_probability(prompt, self.positive_label)
         prob_negative = self._get_label_probability(prompt, self.negative_label)
@@ -323,9 +338,9 @@ class TextClassifier:
         norm_prob_negative = prob_negative / total_prob
         
         if norm_prob_positive > norm_prob_negative:
-            return self.positive_label, norm_prob_positive
+            return self.positive_label, norm_prob_positive, "Social comparison detected."
         else:
-            return self.negative_label, norm_prob_negative
+            return self.negative_label, norm_prob_negative, ""
     
     def _get_label_probability(self, prompt: str, label: str) -> float:
         """Get probability of a specific label by sampling multiple times."""
@@ -435,12 +450,12 @@ class TextClassifier:
                     batch_results = self._process_paragraph_batch(batch_data, batch_size)
                     
                     # Handle results
-                    for paragraph_num, response, confidence, _ in batch_results:
+                    for paragraph_num, response, confidence, explanation in batch_results:
                         total_processed += 1
                         
                         if response == '1':
                             total_found += 1
-                            self.append_result(paragraph_num, paragraphs[paragraph_num - 1], confidence)
+                            self.append_result(paragraph_num, paragraphs[paragraph_num - 1], confidence, explanation)
                             result_status = f"● found (conf: {confidence:.2f})"
                         else:
                             result_status = f"○ skip (conf: {confidence:.2f})"
@@ -518,47 +533,6 @@ class TextClassifier:
             if current == total:
                 print()  # Final newline
 
-    def get_explanation(self, text: str) -> str:
-        """Get a 1-sentence explanation for why this text contains social comparison."""
-        explanation_prompt = self.explanation_prompt.format(text=text)
-        
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[{
-                    'role': 'user',
-                    'content': explanation_prompt
-                }],
-                options={
-                    'temperature': 0.3,
-                    'top_p': 0.9,
-                    'num_predict': 4096,  # Allow full thinking process
-                    'num_ctx': 4096,
-                    'keep_alive': '10m'
-                },
-                stream=False
-            )
-            
-            explanation = response['message']['content'].strip()
-            
-            # Handle thinking format if present
-            if '</think>' in explanation:
-                explanation = explanation.split('</think>')[-1].strip()
-            elif '<think>' in explanation:
-                # If truncated, just use what we have after <think>
-                explanation = explanation.replace('<think>', '').strip()
-            
-            # Ensure it's a single sentence (take first sentence if multiple)
-            if '.' in explanation:
-                explanation = explanation.split('.')[0] + '.'
-            
-            return explanation if explanation else "Social comparison detected."
-            
-        except Exception as e:
-            if self.verbose:
-                print(f"Error getting explanation: {e}")
-            return "Social comparison detected."
-
     def _get_run_directory(self) -> Path:
         """Get the appropriate run directory (numbered subdirectory)."""
         existing_runs = [
@@ -604,11 +578,7 @@ class TextClassifier:
         def process_single_paragraph(paragraph_info):
             paragraph_num, paragraph = paragraph_info
             try:
-                response, confidence = self.classify_text(paragraph)
-                if response == '1' and not self.simple:
-                    explanation = self.get_explanation(paragraph)
-                else:
-                    explanation = ""
+                response, confidence, explanation = self.classify_text(paragraph)
                 return (paragraph_num, response, confidence, explanation)
             except Exception as e:
                 if self.verbose:
