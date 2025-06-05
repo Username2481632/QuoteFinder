@@ -26,21 +26,31 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False):
+    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False):
         """
         Initialize the Text Classifier.
         
         Args:
             config_file: Path to the configuration JSON file
             verbose: Whether to show detailed debug output
+            simple: If True, only generate raw quotes without explanations
         """
         self.config = self._load_config(config_file)
         self.model_name = self.config['model_name']
         self.verbose = verbose
+        self.simple = simple
         self.prompt_template = self.config['classification_prompt']
         self.explanation_prompt = self.config['explanation_prompt']
         self.progress_file = "progress.json"
-        self.output_file = "results.txt"
+        
+        # Create output directory
+        self.output_dir = Path("output")
+        self.output_dir.mkdir(exist_ok=True)
+        
+        # Set output files
+        self.raw_quotes_file = self.output_dir / "raw_quotes.txt"
+        self.detailed_results_file = self.output_dir / "detailed_results.txt"
+        
         self.results_count = 0
         self.positive_label = "1"
         self.negative_label = "0"
@@ -68,33 +78,48 @@ class TextClassifier:
             json.dump(progress, f, indent=2)
     
     def _create_output_file_header(self):
-        """Create output file with header if it doesn't exist."""
-        if not Path(self.output_file).exists():
-            with open(self.output_file, 'w', encoding='utf-8') as f:
+        """Create output files with headers if they don't exist."""
+        # Always create raw quotes file header
+        if not self.raw_quotes_file.exists():
+            with open(self.raw_quotes_file, 'w', encoding='utf-8') as f:
+                pass  # Start with empty file for quotes
+        
+        # Create detailed results file header only if not in simple mode
+        if not self.simple and not self.detailed_results_file.exists():
+            with open(self.detailed_results_file, 'w', encoding='utf-8') as f:
                 f.write("Social Comparison Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
     
     def append_result(self, paragraph_num: int, text: str, confidence: float):
-        """Append a result immediately to the output file."""
-        # Create header if this is the first result
+        """Append a result immediately to the output files."""
+        # Create headers if this is the first result
         if self.results_count == 0:
-            with open(self.output_file, 'w', encoding='utf-8') as f:
-                f.write("Social Comparison Paragraphs Found\n")
-                f.write("=" * 50 + "\n\n")
+            self._create_output_file_header()
         
-        # Get explanation for this finding (quietly)
-        explanation = self.get_explanation(text)
+        self.results_count += 1
         
-        with open(self.output_file, 'a', encoding='utf-8') as f:
-            self.results_count += 1
-            f.write(f"Finding #{self.results_count} (Paragraph {paragraph_num}, Confidence: {confidence:.2f})\n")
-            f.write("-" * 60 + "\n")
-            f.write(f"Explanation: {explanation}\n\n")
-            f.write(f"{text}\n\n")
+        # Always write to raw quotes file
+        with open(self.raw_quotes_file, 'a', encoding='utf-8') as f:
+            f.write(f'"{text}"\n')
+        
+        # Write to detailed results file only if not in simple mode
+        explanation = None
+        if not self.simple:
+            # Get explanation for this finding (quietly)
+            explanation = self.get_explanation(text)
+            
+            with open(self.detailed_results_file, 'a', encoding='utf-8') as f:
+                f.write(f"Finding #{self.results_count} (Paragraph {paragraph_num}, Confidence: {confidence:.2f})\n")
+                f.write("-" * 60 + "\n")
+                f.write(f"Explanation: {explanation}\n\n")
+                f.write(f"{text}\n\n")
         
         # Only print detailed info in verbose mode
         if self.verbose:
-            print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - {explanation}")
+            if self.simple:
+                print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f})")
+            else:
+                print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - {explanation}")
         # In non-verbose mode, the progress bar will handle the display
 
     def _extract_text_from_html(self, html_path: str) -> str:
@@ -466,13 +491,14 @@ def main():
     parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
+    parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")
     args = parser.parse_args()
     
     print("Text Classifier")
     print("=" * 30)
     
     # Initialize classifier with config file
-    classifier = TextClassifier(config_file=args.config, verbose=args.verbose)
+    classifier = TextClassifier(config_file=args.config, verbose=args.verbose, simple=args.simple)
     
     # Check if model is available
     verify_model_available(classifier.model_name)
@@ -491,7 +517,12 @@ def main():
     # Process the text file
     classifier.process_text_file("huckleberry_finn.html")
     
-    print(f"\nResults saved to: {classifier.output_file}")
+    print(f"\nResults saved to: {classifier.output_dir}")
+    if args.simple:
+        print(f"- Raw quotes: {classifier.raw_quotes_file}")
+    else:
+        print(f"- Raw quotes: {classifier.raw_quotes_file}")
+        print(f"- Detailed results: {classifier.detailed_results_file}")
     if args.verbose:
         print(f"Progress file: {classifier.progress_file}")
 
