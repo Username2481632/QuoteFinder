@@ -28,8 +28,8 @@ ollama serve
 ### 2. Pull the DeepSeek Model
 
 ```bash
-# Pull the DeepSeek-R1 distill model
-ollama pull deepseek-r1-distill-llama-8b
+# Pull the DeepSeek-R1 model
+ollama pull deepseek-r1:1.5b
 ```
 
 ### 3. Install Python Dependencies
@@ -102,7 +102,7 @@ It will automatically resume from where it left off using the `progress.json` fi
 ## Performance Notes
 
 - Processing time depends on text size and model speed
-- DeepSeek-R1 distill is optimized for speed while maintaining quality
+- DeepSeek-R1 model optimized for speed while maintaining quality
 - On M2 Mac Mini, expect ~1-3 seconds per paragraph
 - Progress is saved after each paragraph for safety
 
@@ -111,7 +111,7 @@ It will automatically resume from where it left off using the `progress.json` fi
 ### "Model not found" error
 ```bash
 ollama list  # Check available models
-ollama pull deepseek-r1-distill-llama-8b  # Pull the model
+ollama pull deepseek-r1:1.5b  # Pull the model
 ```
 
 ### "Error connecting to Ollama"

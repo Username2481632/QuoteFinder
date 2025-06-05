@@ -27,7 +27,7 @@ import ollama
 
 
 class SocialComparisonFinder:
-    def __init__(self, model_name: str = "deepseek-r1-distill-llama-1.5b"):
+    def __init__(self, model_name: str = "deepseek-r1:1.5b"):
         """
         Initialize the Social Comparison Finder.
         
@@ -402,7 +402,7 @@ def main():
         sys.exit(1)
     
     # Check if model is available
-    model_name = "deepseek-r1-distill-llama-1.5b"
+    model_name = "deepseek-r1:1.5b"
     try:
         models_response = ollama.list()
         print(f"Debug: Ollama response: {models_response}")
