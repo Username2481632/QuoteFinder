@@ -175,36 +175,37 @@ Paragraph: {paragraph}"""
         try:
             prompt = self.prompt_template.format(paragraph=paragraph)
             
-            # Generate response with logprobs to get token probabilities
-            response = ollama.generate(
+            # Generate response using ollama.chat
+            response = ollama.chat(
                 model=self.model_name,
-                prompt=prompt,
+                messages=[{
+                    'role': 'user',
+                    'content': prompt
+                }],
                 options={
                     'temperature': 0.1,
                     'top_p': 0.9,
-                    'num_predict': 1,    # Only predict 1 token
+                    'num_predict': 10,    # Allow a few tokens for response
                     'num_ctx': 4096,     # Context window
                 },
-                format='',  # No specific format constraint
                 stream=False
             )
             
-            # Get the generated token and try to extract probabilities
-            generated_text = response['response'].strip()
+            # Get the generated text
+            generated_text = response['message']['content'].strip()
             
-            # Try to get logprobs if available (newer Ollama versions)
-            if 'eval_logprobs' in response or hasattr(response, 'logprobs'):
-                # Use the probability-based approach
-                return self._query_model_with_probabilities(paragraph)
+            # Parse the response for 1 or 0
+            if '1' in generated_text and '0' not in generated_text:
+                return '1', 0.9  # High confidence for clear "1"
+            elif '0' in generated_text and '1' not in generated_text:
+                return '0', 0.9  # High confidence for clear "0"
+            elif '1' in generated_text:
+                return '1', 0.7  # Medium confidence if both present, prefer 1
+            elif '0' in generated_text:
+                return '0', 0.7  # Medium confidence if both present, prefer 0
             else:
-                # Fallback to text parsing with simulated confidence
-                if '1' in generated_text:
-                    return '1', 0.8  # High confidence for clear response
-                elif '0' in generated_text:
-                    return '0', 0.8
-                else:
-                    print(f"Warning: Unexpected model response: {generated_text}")
-                    return '0', 0.5  # Low confidence for unclear response
+                print(f"Warning: Unexpected model response: '{generated_text}' - treating as 0")
+                return '0', 0.3  # Low confidence for unclear response
                 
         except Exception as e:
             print(f"Error querying model: {e}")
@@ -252,18 +253,20 @@ Paragraph: {paragraph}"""
             total_samples = 5
             
             for _ in range(total_samples):
-                response = ollama.generate(
+                response = ollama.chat(
                     model=self.model_name,
-                    prompt=prompt,
+                    messages=[{
+                        'role': 'user',
+                        'content': prompt
+                    }],
                     options={
                         'temperature': 0.3,  # Some randomness but not too much
                         'top_p': 0.9,
                         'num_predict': 1,
-                        'seed': None,  # Different seed each time
                     }
                 )
                 
-                generated = response['response'].strip()
+                generated = response['message']['content'].strip()
                 if completion in generated:
                     matches += 1
             
@@ -276,16 +279,19 @@ Paragraph: {paragraph}"""
     def _fallback_query(self, prompt: str) -> tuple[str, float]:
         """Fallback method using standard text generation."""
         try:
-            response = ollama.generate(
+            response = ollama.chat(
                 model=self.model_name,
-                prompt=prompt,
+                messages=[{
+                    'role': 'user',
+                    'content': prompt
+                }],
                 options={
                     'temperature': 0.1,
                     'num_predict': 1,
                 }
             )
             
-            content = response['response'].strip()
+            content = response['message']['content'].strip()
             if '1' in content:
                 return '1', 0.8
             elif '0' in content:
@@ -453,7 +459,11 @@ def main():
         else:
             # Try a simple test call instead
             print("Trying test call to verify Ollama connection...")
-            test_response = ollama.generate(model=model_name, prompt="test", options={'num_predict': 1})
+            test_response = ollama.chat(
+                model=model_name, 
+                messages=[{'role': 'user', 'content': 'test'}], 
+                options={'num_predict': 1}
+            )
             print("Ollama connection successful!")
             model_names = [model_name]  # Assume model exists if test call works
         
