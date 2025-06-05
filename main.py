@@ -18,6 +18,8 @@ Usage:
 import json
 import re
 import sys
+import subprocess
+import time
 from pathlib import Path
 from typing import List, Tuple, Dict
 from bs4 import BeautifulSoup
@@ -25,7 +27,7 @@ import ollama
 
 
 class SocialComparisonFinder:
-    def __init__(self, model_name: str = "deepseek-r1-distill-llama-8b"):
+    def __init__(self, model_name: str = "deepseek-r1-distill-llama-1.5b"):
         """
         Initialize the Social Comparison Finder.
         
@@ -35,7 +37,7 @@ class SocialComparisonFinder:
         self.model_name = model_name
         self.prompt_template = self._get_hardcoded_prompt()
         self.progress_file = "progress.json"
-        self.output_file = "social_comparisons.txt"
+        self.output_file = "results.txt"
         self.results_count = 0
         
     def _get_hardcoded_prompt(self) -> str:
@@ -364,24 +366,78 @@ Paragraph: {paragraph}"""
         return progress
 
 
+def ensure_ollama_running():
+    """Ensure Ollama is running, start it if not."""
+    try:
+        # Test if Ollama is responding
+        ollama.list()
+        return True
+    except Exception:
+        print("Ollama not running. Starting Ollama...")
+        try:
+            # Start Ollama in the background
+            subprocess.Popen(['ollama', 'serve'], 
+                           stdout=subprocess.DEVNULL, 
+                           stderr=subprocess.DEVNULL)
+            
+            # Wait for Ollama to start
+            for i in range(10):  # Wait up to 10 seconds
+                time.sleep(1)
+                try:
+                    ollama.list()
+                    print("Ollama started successfully!")
+                    return True
+                except:
+                    continue
+            
+            print("Failed to start Ollama after 10 seconds")
+            return False
+            
+        except FileNotFoundError:
+            print("Ollama not found. Please install Ollama first.")
+            print("Visit: https://ollama.ai/download")
+            return False
+        except Exception as e:
+            print(f"Error starting Ollama: {e}")
+            return False
+
+
 def main():
     print("Social Comparison Finder")
     print("=" * 30)
     
-    # Check if Ollama is running and model is available
-    model_name = "deepseek-r1-distill-llama-8b"
+    # Ensure Ollama is running
+    if not ensure_ollama_running():
+        sys.exit(1)
+    
+    # Check if model is available
+    model_name = "deepseek-r1-distill-llama-1.5b"
     try:
-        models = ollama.list()
-        model_names = [model['name'] for model in models['models']]
+        models_response = ollama.list()
+        print(f"Debug: Ollama response: {models_response}")
+        
+        # Handle different response formats
+        if isinstance(models_response, dict) and 'models' in models_response:
+            model_names = [model.get('name', model.get('model', '')) for model in models_response['models']]
+        else:
+            # Try a simple test call instead
+            print("Trying test call to verify Ollama connection...")
+            test_response = ollama.generate(model=model_name, prompt="test", options={'num_predict': 1})
+            print("Ollama connection successful!")
+            model_names = [model_name]  # Assume model exists if test call works
+        
         if model_name not in model_names:
             print(f"Error: Model '{model_name}' not found in Ollama.")
             print(f"Available models: {', '.join(model_names)}")
             print(f"Run: ollama pull {model_name}")
             sys.exit(1)
+        else:
+            print(f"Using model: {model_name}")
+            
     except Exception as e:
-        print(f"Error connecting to Ollama: {e}")
-        print("Make sure Ollama is installed and running.")
-        print("Visit: https://ollama.ai/download")
+        print(f"Error checking model: {e}")
+        print(f"Error type: {type(e)}")
+        print(f"Run: ollama pull {model_name}")
         sys.exit(1)
     
     # Create finder and process text file
