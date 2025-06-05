@@ -389,7 +389,6 @@ Text: "{text}" """
             raise FileNotFoundError(f"Text file not found: {text_file}")
 
         print(f"Processing text file: {text_file}")
-        print(f"Using model: {self.model_name}")
         
         # Load progress
         progress = self.load_progress()
@@ -397,10 +396,13 @@ Text: "{text}" """
         total_processed = progress["total_processed"]
         total_found = progress["total_found"]
         
-        print(f"Resuming from paragraph {start_paragraph + 1}")
-        if total_found > 0:
-            print(f"Previously found {total_found} social comparisons")
-        
+        if start_paragraph > 0:
+            print(f"Resuming from paragraph {start_paragraph + 1}")
+            if total_found > 0:
+                print(f"Previously found {total_found} social comparisons")
+        else:
+            print(f"Analyzing from beginning")
+
         # Always create output file header
         self._create_output_file_header()
         
