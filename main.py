@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Dict, Union, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from bs4 import BeautifulSoup
 import ollama
@@ -62,14 +62,14 @@ class TextClassifier:
         self.search_criteria = self.config['search_criteria']
         
         # Progress tracking
-        self.start_time = None
-        self.session_start_processed = 0  # How many were processed when this session started
-        self.cancelled = False  # Flag for cancellation
+        self.start_time: Optional[float] = None
+        self.session_start_processed: int = 0  # How many were processed when this session started
+        self.cancelled: bool = False  # Flag for cancellation
         
         # Current progress state (updated during processing)
-        self.current_paragraph = 0
-        self.current_total_processed = 0
-        self.current_total_found = 0
+        self.current_paragraph: int = 0
+        self.current_total_processed: int = 0
+        self.current_total_found: int = 0
         
         # Create main output directory
         self.base_output_dir = Path("output")
@@ -99,14 +99,14 @@ class TextClassifier:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
         
         # Validate required fields
-        required_fields = ['model_names', 'target_file', 'search_criteria']
-        missing_fields = [field for field in required_fields if field not in config]
+        required_fields: List[str] = ['model_names', 'target_file', 'search_criteria']
+        missing_fields: List[str] = [field for field in required_fields if field not in config]
         
         if missing_fields:
             raise ValueError(f"Configuration file '{config_file}' is missing required fields: {', '.join(missing_fields)}")
         
         # Validate that fields are not empty
-        empty_fields = []
+        empty_fields: List[str] = []
         for field in required_fields:
             value = config[field]
             if field == 'model_names':
@@ -135,7 +135,7 @@ class TextClassifier:
         with open(self.progress_file, 'w') as f:
             json.dump(progress, f, indent=2)
     
-    def _create_output_file_header(self):
+    def _create_output_file_header(self) -> None:
         """Create output files with headers if they don't exist."""
         # Always create raw quotes file header
         if not self.raw_quotes_file.exists():
@@ -148,7 +148,7 @@ class TextClassifier:
                 f.write("Matching Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
     
-    def append_result(self, paragraph_num: int, text: str, confidence: float, explanation: str = ""):
+    def append_result(self, paragraph_num: int, text: str, confidence: float, explanation: str = "") -> None:
         """Append a result immediately to the output files."""
         # Create headers if this is the first result
         if self.results_count == 0:
@@ -191,7 +191,7 @@ class TextClassifier:
         paragraphs = soup.find_all('p')
         if paragraphs:
             # If we have proper paragraph tags, use them
-            text_parts = []
+            text_parts: List[str] = []
             for p in paragraphs:
                 p_text = p.get_text().strip()
                 if len(p_text) > 20:  # Skip very short paragraphs
@@ -225,7 +225,7 @@ class TextClassifier:
             paragraphs = text.split('\n')
         
         # Clean and filter paragraphs
-        cleaned_paragraphs = []
+        cleaned_paragraphs: List[str] = []
         for para in paragraphs:
             cleaned = self._clean_paragraph(para)
             # Skip very short paragraphs (likely page numbers, headers, etc.)
@@ -244,7 +244,7 @@ class TextClassifier:
         # Split by double newlines to get stanzas
         potential_stanzas = re.split(r'\n\s*\n', text)
         
-        stanzas = []
+        stanzas: List[str] = []
         for stanza in potential_stanzas:
             # Clean up the stanza
             cleaned = stanza.strip()
@@ -262,7 +262,7 @@ class TextClassifier:
         
         return stanzas
 
-    def classify_text(self, text: str, model_name: str, need_explanation: bool = True) -> tuple[str, float, str]:
+    def classify_text(self, text: str, model_name: str, need_explanation: bool = True) -> Tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build prompt with conditional explanation instructions
         combined_prompt = f"""Does this text match the following criteria:
@@ -392,7 +392,7 @@ Text: "{text}" """
         
         return matches / total_samples
 
-    def classify_with_cascade(self, text: str, progress_callback=None, stanza_info="") -> tuple[str, float, str, str]:
+    def classify_with_cascade(self, text: str, progress_callback: Optional[Callable] = None, stanza_info: str = "") -> Tuple[str, float, str, str]:
         """
         Classify text using cascade verification with multiple models.
         First model detects positives, subsequent models verify them.
@@ -413,8 +413,8 @@ Text: "{text}" """
             return response, confidence, explanation, cascade_info
         
         # Multi-model cascade verification
-        explanation = ""
-        cascade_decisions = []
+        explanation: str = ""
+        cascade_decisions: List[str] = []
         
         for i, model_name in enumerate(self.model_names):
             # Only final model needs to generate explanations
@@ -700,17 +700,17 @@ Text: "{text}" """
         results.sort(key=lambda x: x[0])
         return results
 
-    def _process_paragraphs_continuously(self, paragraph_list, paragraphs, content_type, total_paragraphs):
+    def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
         """Process all paragraphs continuously with up to 8 concurrent evaluations."""
         import sys
         import threading
         
         # Thread-safe state management
-        stanza_states = {}
-        completed_stanzas = set()
-        active_lines = []  # Ordered list of paragraph_nums currently displayed
-        active_lines_status = {}  # Maps paragraph_num to (content, is_completed)
-        display_lock = threading.Lock()
+        stanza_states: Dict[int, Dict[str, Any]] = {}
+        completed_stanzas: set[int] = set()
+        active_lines: List[int] = []  # Ordered list of paragraph_nums currently displayed
+        active_lines_status: Dict[int, Tuple[str, bool]] = {}  # Maps paragraph_num to (content, is_completed)
+        display_lock: threading.Lock = threading.Lock()
         
         # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
@@ -720,7 +720,7 @@ Text: "{text}" """
                 'final_result': None
             }
 
-        def update_line(paragraph_num, line_content, is_final=False):
+        def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
             """Thread-safe line update with cursor positioning."""
             with display_lock:
                 if paragraph_num not in active_lines:
@@ -752,10 +752,10 @@ Text: "{text}" """
                     del active_lines_status[completed_paragraph]
 
         with ThreadPoolExecutor(max_workers=8) as executor:
-            active_futures = {}
-            paragraph_queue = list(paragraph_list)  # Copy for safe iteration
+            active_futures: Dict[Any, Tuple[int, int]] = {}
+            paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)  # Copy for safe iteration
             
-            def start_next_stanza_if_available():
+            def start_next_stanza_if_available() -> bool:
                 """Start the next stanza from queue if available. Returns True if started."""
                 if paragraph_queue and self.model_names:
                     next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
@@ -877,30 +877,30 @@ Text: "{text}" """
                         start_next_stanza_if_available()
 
 
-def verify_models_available(model_names: Union[str, List[str]]):
+def verify_models_available(model_names: Union[str, List[str]]) -> None:
     """Verify that the specified model(s) are available in Ollama."""
     models_response = ollama.list()
     
     # Extract model names from the response
-    available_models = [model.model for model in models_response.models]
+    available_models: List[str] = [model.model for model in models_response.models if model.model]
     
     print(f"Available models: {available_models}")
     
     # Support both single model (backward compatibility) and multiple models
     if isinstance(model_names, str):
-        models_to_check = [model_names]
+        models_to_check: List[str] = [model_names]
     else:
         models_to_check = model_names
     
-    missing_models = []
+    missing_models: List[str] = []
     for model_name in models_to_check:
         if model_name not in available_models:
             missing_models.append(model_name)
     
     if missing_models:
-        missing_str = ', '.join(missing_models)
-        available_str = ', '.join(available_models)
-        pull_commands = ' && '.join([f"ollama pull {model}" for model in missing_models])
+        missing_str: str = ', '.join(missing_models)
+        available_str: str = ', '.join(available_models)
+        pull_commands: str = ' && '.join([f"ollama pull {model}" for model in missing_models])
         raise ValueError(f"Model(s) {missing_str} not found. Available models: {available_str}. Run: {pull_commands}")
     
     if len(models_to_check) == 1:
@@ -963,7 +963,7 @@ def start_ollama(verbose: bool = False) -> bool:
         return False
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Extract matching paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
@@ -1031,9 +1031,9 @@ def main():
 
 
 # Global variable to hold classifier instance for signal handler
-classifier_instance = None
+classifier_instance: Optional[Any] = None
 
-def signal_handler(signum, frame):
+def signal_handler(signum: int, frame: Any) -> None:
     """Handle Ctrl+C by saving progress and terminating immediately."""
     global classifier_instance
     
@@ -1041,7 +1041,7 @@ def signal_handler(signum, frame):
     
     # Save current progress - classifier_instance is guaranteed to exist
     try:
-        current_progress = {
+        current_progress: Dict[str, int] = {
             "last_paragraph": classifier_instance.current_paragraph,
             "total_processed": classifier_instance.current_total_processed,
             "total_found": classifier_instance.current_total_found
