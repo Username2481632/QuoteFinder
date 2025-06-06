@@ -460,8 +460,8 @@ Text: "{text}" """
                         if self.verbose:
                             print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {result_status}")
                         else:
-                            # Update progress bar with result
-                            self._update_progress(total_processed, total_paragraphs, result_status)
+                            # Update progress bar with total found count
+                            self._update_progress(total_processed, total_paragraphs, total_found)
                         
                         # Save progress after each paragraph
                         progress = {
@@ -509,7 +509,7 @@ Text: "{text}" """
         
         return progress
 
-    def _update_progress(self, current: int, total: int, result: str = ""):
+    def _update_progress(self, current: int, total: int, total_found: int = 0):
         """Update progress bar in place."""
         if not self.verbose:
             # Create a simple progress bar
@@ -520,8 +520,8 @@ Text: "{text}" """
             
             # Calculate ETA or speed if we have enough data
             status = f"[{current:4d}/{total}] {bar} {progress:.1%}"
-            if result:
-                status += f" | Last: {result}"
+            if total_found > 0:
+                status += f" | Found: {total_found}"
             
             # Use \r to overwrite the current line
             print(f"\r{status}", end="", flush=True)
