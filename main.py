@@ -708,7 +708,7 @@ Text: "{text}" """
         # Thread-safe state management
         stanza_states: Dict[int, Dict[str, Any]] = {}
         completed_stanzas: set[int] = set()
-        active_lines: List[int] = []  # Track which paragraphs we've seen
+        active_lines: List[int] = []  # Track order of displayed lines
         display_lock: threading.Lock = threading.Lock()
         
         # Initialize all paragraph states
@@ -720,18 +720,37 @@ Text: "{text}" """
             }
 
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Simple scrolling display - just print each significant update."""
+            """Real-time line update with proper ANSI positioning."""
             with display_lock:
-                if is_final:
-                    # Always print final results
-                    print(line_content)
-                elif paragraph_num not in active_lines:
-                    # First time seeing this paragraph - print initial state
+                if paragraph_num not in active_lines:
+                    # New line - add to our tracking and display
                     active_lines.append(paragraph_num)
                     print(line_content)
-                # For intermediate updates of existing lines, we'll skip printing
-                # This avoids all the ANSI complexity while still showing progress
-        with ThreadPoolExecutor(max_workers=3) as executor:
+                else:
+                    # Update existing line - find its position and update in place
+                    try:
+                        line_index = active_lines.index(paragraph_num)
+                        # Calculate how many lines to move up from current position
+                        lines_to_move_up = len(active_lines) - line_index
+                        
+                        # Move up, clear line, write new content, move back down
+                        print(f"\033[{lines_to_move_up}A\033[2K\r{line_content}\033[{lines_to_move_up}B")
+                        
+                    except ValueError:
+                        # Fallback if line not found - just print
+                        print(line_content)
+                
+                # Clean up completed lines to prevent infinite growth
+                if is_final and len(active_lines) > 10:
+                    # Remove oldest completed lines, keeping last 10
+                    lines_to_remove = len(active_lines) - 10
+                    for _ in range(lines_to_remove):
+                        if active_lines:
+                            active_lines.pop(0)
+                            # Clear the top line by moving up and clearing
+                            print(f"\033[{len(active_lines)+1}A\033[2K\033[{len(active_lines)+1}B")
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
             paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)  # Copy for safe iteration
             
@@ -745,7 +764,7 @@ Text: "{text}" """
                 return False
             
             # Start initial batch of Model 1 evaluations (up to 8)
-            for _ in range(min(3, len(paragraph_queue))):
+            for _ in range(min(8, len(paragraph_queue))):
                 start_next_stanza_if_available()
             
             # Process results as they complete and keep queue flowing
@@ -844,6 +863,10 @@ Text: "{text}" """
                         if self.verbose:
                             print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
                         
+                        state = stanza_states[paragraph_num]
+                        state['final_result'] = ('0', 0.0, "")
+                        
+                        # Update display with error
                         line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Error → ○ skip"
                         update_line(paragraph_num, line_content, is_final=True)
                         
@@ -851,6 +874,7 @@ Text: "{text}" """
                         
                         # ALWAYS start next paragraph when ANY stanza completes (error)
                         start_next_stanza_if_available()
+
 
 def verify_models_available(model_names: Union[str, List[str]]) -> None:
     """Verify that the specified model(s) are available in Ollama."""
