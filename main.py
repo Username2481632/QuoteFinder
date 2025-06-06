@@ -873,14 +873,10 @@ def main():
 classifier_instance = None
 
 def signal_handler(signum, frame):
-    """Handle Ctrl+C gracefully by setting cancellation flag."""
-    global classifier_instance
-    if classifier_instance:
-        print("\n\nReceived cancellation signal (Ctrl+C). Stopping after current batch...")
-        classifier_instance.cancelled = True
-    else:
-        print("\n\nCancelled.")
-        sys.exit(1)
+    """Handle Ctrl+C by exiting immediately."""
+    print("\n\nReceived cancellation signal (Ctrl+C). Stopping immediately...")
+    print("Cancelled.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
