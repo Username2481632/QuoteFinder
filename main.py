@@ -715,7 +715,7 @@ Text: "{text}" """
         display_lock: threading.Lock = threading.Lock()
         
         # Scrolling window for display (show last N completed + active processes)
-        MAX_COMPLETED_DISPLAY = 20  # Show only last 20 completed items
+        MAX_COMPLETED_DISPLAY = 8  # Show only last 8 completed items
         recent_completed: List[int] = []  # Recently completed stanzas in order
         
         # Initialize all paragraph states
@@ -738,7 +738,7 @@ Text: "{text}" """
         def update_display() -> None:
             """Update the scrolling display: recent completions + active processes."""
             with display_lock:
-                # Calculate lines to move up (20 completed + 1 separator + 8 active = 29 lines)
+                # Calculate lines to move up (8 completed + 1 separator + 8 active = 17 lines)
                 total_lines = MAX_COMPLETED_DISPLAY + 1 + 8
                 
                 # Move to start of display
