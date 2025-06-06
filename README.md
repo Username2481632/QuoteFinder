@@ -1,23 +1,21 @@
 # Quote Finder
 
-Extract paragraphs containing specific content from text using multiple local language models with cascade verification. Supports both HTML files (like Huckleberry Finn) and TXT files (like The Odyssey).
+Extract paragraphs containing specific content from text using local language models. Supports both HTML files (like Huckleberry Finn) and TXT files (like The Odyssey).
 
-## Multi-Model Cascade Verification
+## Multi-Model Support
 
-This tool uses a **cascade verification system** where multiple AI models work together to ensure high-precision results:
+The tool supports using multiple AI models for improved accuracy:
 
-1. **First model** scans text and identifies potential matches
-2. **Subsequent models** verify each positive detection
-3. **Any negative vote** → immediate rejection
-4. **All positive votes** → approved match with combined explanations
-
-This dramatically reduces false positives while maintaining high recall.
+- **Single model**: Fast, standard classification
+- **Multiple models**: Enhanced precision through verification
+- **Flexible configuration**: Use 1-5+ models based on your needs
 
 ## Setup
 
 1. **Install Ollama** from https://ollama.ai/download
 2. **Pull models**: 
    ```bash
+   # Example
    ollama pull gemma3:4b
    ollama pull qwen3:4b
    ollama pull deepseek-r1:8b
@@ -97,11 +95,10 @@ Configuration files specify the models, target file, and search criteria:
 
 ### Multi-Model Setup
 
-- **`model_names`**: Array of models for cascade verification
-- **First model**: Primary detector (fast, high-recall model recommended)
-- **Verification models**: Secondary validators (accuracy-focused models)
-- **Minimum**: 1 model (standard classification)
-- **Recommended**: 2-3 models for optimal precision/recall balance
+- **`model_names`**: Array of models to use
+- **Single model**: `["qwen3:4b"]` - Fast, standard classification
+- **Multiple models**: `["gemma3:4b", "qwen3:4b"]` - Enhanced accuracy through verification
+- **Custom setup**: Use any combination of available models
 
 ### Sample Configuration
 
@@ -129,7 +126,7 @@ The included `sample_config.json` provides a starting template:
 
 ## Features
 
-- **Cascade verification** - Multiple AI models validate each match for high precision
+- **Multi-model support** - Use single or multiple AI models for classification
 - **Automatic model management** - Models load on-demand and stay cached for performance
 - **Automatic Ollama startup** - Starts Ollama if not running
 - **Multiple file formats** - HTML (paragraphs) and TXT (stanzas)
@@ -139,24 +136,9 @@ The included `sample_config.json` provides a starting template:
 - **Real-time output** - See results as they're found
 - **Configurable** - Easy prompt and model customization
 - **Performance optimized** - Model keep-alive and parallel batch processing
-- **Combined analysis** - Classification and explanation in single model call
 - **Cross-platform** - Works on Windows, Mac, Linux
 
-## Model Recommendations
-
-### Fast Detection + High Precision
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b"]
-}
-```
-
-### Maximum Precision (3-model consensus)
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"]
-}
-```
+## Model Setup Options
 
 ### Single Model (fastest)
 ```json
@@ -165,33 +147,34 @@ The included `sample_config.json` provides a starting template:
 }
 ```
 
-## How Cascade Verification Works
+### Dual Model Verification
+```json
+{
+  "model_names": ["gemma3:4b", "qwen3:4b"]
+}
+```
 
-### Example with 3 Models: `["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"]`
+### Enhanced Precision
+```json
+{
+  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"]
+}
+```
 
-1. **Step 1**: `gemma3:4b` analyzes each paragraph
-   - If it says "0" (no match) → paragraph rejected immediately
-   - If it says "1" (match) → proceed to verification
+## Multi-Model Verification
 
-2. **Step 2**: `qwen3:4b` verifies the potential match
-   - If it says "0" → paragraph rejected (cascade broken)
-   - If it says "1" → proceed to final verification
+When using multiple models, each paragraph is processed sequentially:
 
-3. **Step 3**: `deepseek-r1:8b` final verification
-   - If it says "0" → paragraph rejected
-   - If it says "1" → ✅ **APPROVED** (all models agree)
+1. **First model** analyzes the text
+2. **Additional models** verify positive results
+3. **All models must agree** for a match to be approved
 
-### Output Example
+### Example Output
 ```
   Model 1 (gemma3:4b): 1 (conf: 0.95)
   Model 2 (qwen3:4b): 1 (conf: 0.89)  
-  Model 3 (deepseek-r1:8b): 1 (conf: 0.92)
-  Cascade approved by all 3 models
+  ✓ Match approved by all models
 ● found (conf: 0.95)
 ```
 
-### Benefits
-- **Eliminates false positives**: All models must agree
-- **Maintains recall**: Only one model needs to detect initially
-- **Rich explanations**: Combines insights from multiple models
-- **Flexible**: Use 1-5+ models based on precision needs
+This approach reduces false positives while maintaining good detection rates.
