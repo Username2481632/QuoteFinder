@@ -718,50 +718,76 @@ Text: "{text}" """
                 'final_result': None
             }
 
-        # Fixed 8-slot display window for real-time updates
-        display_window = [""] * 8  # 8 slots for 8 workers
+        # Display management for completed stanzas + live status window
+        completed_stanzas_display: List[str] = []
+        active_window = [""] * 8  # 8 slots for 8 workers
         slot_assignments = {}      # Maps paragraph_num to slot_index
         next_available_slot = 0    # Next slot to assign
-        window_initialized = False
+        status_window_active = False
 
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Real-time line update using fixed 8-line window."""
-            nonlocal next_available_slot, window_initialized
+            """Display completed stanzas above + live status window below."""
+            nonlocal next_available_slot, status_window_active
             
             with display_lock:
-                # Assign slot if this is a new paragraph
-                if paragraph_num not in slot_assignments:
-                    slot_assignments[paragraph_num] = next_available_slot
-                    next_available_slot = (next_available_slot + 1) % 8
-                
-                # Update the content in assigned slot
-                slot_index = slot_assignments[paragraph_num]
-                display_window[slot_index] = line_content
-                
-                # If this is the first update, just print the initial window
-                if not window_initialized:
-                    for line in display_window:
-                        print(line if line else "")
-                    window_initialized = True
-                else:
-                    # Update the display window in place
-                    # Move cursor up 8 lines to start of window
-                    print(f"\033[8A", end="")
-                    
-                    # Redraw all 8 lines
-                    for i, line in enumerate(display_window):
-                        # Clear line and write content
-                        if i == 7:  # Last line
-                            print(f"\033[2K{line if line else ''}")
-                        else:
-                            print(f"\033[2K{line if line else ''}")
-                
-                # Clean up completed assignments
                 if is_final:
-                    # Clear the slot for reuse
-                    display_window[slot_index] = ""
+                    # This stanza is complete - add to completed list
+                    completed_stanzas_display.append(line_content)
+                    
+                    # Clean up from active window
                     if paragraph_num in slot_assignments:
+                        slot_index = slot_assignments[paragraph_num]
+                        active_window[slot_index] = ""
                         del slot_assignments[paragraph_num]
+                    
+                    # Print the completed stanza above the status window
+                    if status_window_active:
+                        # Move up past the status window, print the completed line, then redraw window
+                        print(f"\033[8A", end="")  # Move up past 8-line window
+                        print(f"\033[1L", end="")  # Insert a new line at top
+                        print(f"{line_content}")   # Print completed stanza
+                        
+                        # Redraw the active status window
+                        for i, active_line in enumerate(active_window):
+                            if i == 7:  # Last line
+                                print(f"\033[2K{active_line if active_line else ''}")
+                            else:
+                                print(f"\033[2K{active_line if active_line else ''}")
+                    else:
+                        # No status window yet, just print normally
+                        print(line_content)
+                
+                else:
+                    # This is an active/updating stanza - update status window
+                    
+                    # Assign slot if this is a new paragraph
+                    if paragraph_num not in slot_assignments:
+                        slot_assignments[paragraph_num] = next_available_slot
+                        next_available_slot = (next_available_slot + 1) % 8
+                    
+                    # Update the content in assigned slot
+                    slot_index = slot_assignments[paragraph_num]
+                    active_window[slot_index] = line_content
+                    
+                    # Initialize or update the status window
+                    if not status_window_active:
+                        # First time - print the initial window
+                        for i, line in enumerate(active_window):
+                            if i == 7:  # Last line
+                                print(f"{line if line else ''}")
+                            else:
+                                print(f"{line if line else ''}")
+                        status_window_active = True
+                    else:
+                        # Update the status window in place
+                        print(f"\033[8A", end="")  # Move up to start of window
+                        
+                        # Redraw all 8 lines
+                        for i, line in enumerate(active_window):
+                            if i == 7:  # Last line
+                                print(f"\033[2K{line if line else ''}")
+                            else:
+                                print(f"\033[2K{line if line else ''}")
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
