@@ -724,23 +724,30 @@ Text: "{text}" """
             """Thread-safe line update with cursor positioning."""
             with display_lock:
                 if paragraph_num not in active_lines:
-                    # First time displaying this line
+                    # First time displaying this line - add to end and print
                     active_lines.append(paragraph_num)
                     active_lines_status[paragraph_num] = (line_content, is_final)
                     print(line_content)
                 else:
-                    # Update existing line
+                    # Update existing line - find its position from the bottom
                     idx = active_lines.index(paragraph_num)
-                    lines_up = len(active_lines) - idx
+                    lines_from_bottom = len(active_lines) - idx - 1
                     
-                    # Move cursor up to the target line
-                    sys.stdout.write(f"\033[{lines_up}A")
-                    # Clear the line
-                    sys.stdout.write("\033[2K")
+                    if lines_from_bottom > 0:
+                        # Move cursor up to the target line
+                        sys.stdout.write(f"\033[{lines_from_bottom}A")
+                    
+                    # Move to beginning of line and clear it
+                    sys.stdout.write("\033[G\033[2K")
                     # Write new content
-                    sys.stdout.write(line_content + "\n")
-                    # Move cursor back down
-                    sys.stdout.write(f"\033[{lines_up-1}B")
+                    sys.stdout.write(line_content)
+                    
+                    if lines_from_bottom > 0:
+                        # Move cursor back down to bottom
+                        sys.stdout.write(f"\033[{lines_from_bottom}B")
+                    
+                    # Ensure we end with a newline for the next print
+                    sys.stdout.write("\n")
                     sys.stdout.flush()
                     
                     # Update status
