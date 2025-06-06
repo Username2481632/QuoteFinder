@@ -66,6 +66,11 @@ class TextClassifier:
         self.session_start_processed = 0  # How many were processed when this session started
         self.cancelled = False  # Flag for cancellation
         
+        # Current progress state (updated during processing)
+        self.current_paragraph = 0
+        self.current_total_processed = 0
+        self.current_total_found = 0
+        
         # Create main output directory
         self.base_output_dir = Path("output")
         self.base_output_dir.mkdir(exist_ok=True)
@@ -441,6 +446,11 @@ Text: "{text}" """
         total_processed = progress["total_processed"]
         total_found = progress["total_found"]
         
+        # Initialize current progress state
+        self.current_paragraph = start_paragraph
+        self.current_total_processed = total_processed
+        self.current_total_found = total_found
+        
         if start_paragraph > 0:
             print(f"Resuming from paragraph {start_paragraph + 1}")
             if total_found > 0:
@@ -510,8 +520,13 @@ Text: "{text}" """
                             
                         total_processed += 1
                         
+                        # Update instance variables for signal handler access
+                        self.current_paragraph = paragraph_num
+                        self.current_total_processed = total_processed
+                        
                         if response == '1':
                             total_found += 1
+                            self.current_total_found = total_found
                             self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
                             result_status = f"● found (conf: {confidence:.2f})"
                         else:
@@ -857,8 +872,26 @@ def main():
 classifier_instance = None
 
 def signal_handler(signum, frame):
-    """Handle Ctrl+C by terminating immediately and forcefully."""
-    print("\n\nReceived cancellation signal (Ctrl+C). Stopping immediately...")
+    """Handle Ctrl+C by saving progress and terminating immediately."""
+    global classifier_instance
+    
+    print("\n\nReceived cancellation signal (Ctrl+C). Saving progress and stopping immediately...")
+    
+    # Try to save current progress if we have a classifier instance
+    if classifier_instance:
+        try:
+            # Use the current progress state from instance variables
+            # This reflects the most recent completed work
+            current_progress = {
+                "last_paragraph": classifier_instance.current_paragraph,
+                "total_processed": classifier_instance.current_total_processed,
+                "total_found": classifier_instance.current_total_found
+            }
+            classifier_instance.save_progress(current_progress)
+            print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
+        except Exception as e:
+            print(f"Could not save progress: {e}")
+    
     print("Cancelled.")
     
     # Flush output buffers to ensure messages are shown
