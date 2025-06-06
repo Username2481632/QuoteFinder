@@ -708,7 +708,6 @@ Text: "{text}" """
         # Thread-safe state management
         stanza_states: Dict[int, Dict[str, Any]] = {}
         completed_stanzas: set[int] = set()
-        active_lines: List[int] = []  # Track order of displayed lines
         display_lock: threading.Lock = threading.Lock()
         
         # Initialize all paragraph states
@@ -719,36 +718,50 @@ Text: "{text}" """
                 'final_result': None
             }
 
+        # Fixed 8-slot display window for real-time updates
+        display_window = [""] * 8  # 8 slots for 8 workers
+        slot_assignments = {}      # Maps paragraph_num to slot_index
+        next_available_slot = 0    # Next slot to assign
+        window_initialized = False
+
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Real-time line update with proper ANSI positioning."""
+            """Real-time line update using fixed 8-line window."""
+            nonlocal next_available_slot, window_initialized
+            
             with display_lock:
-                if paragraph_num not in active_lines:
-                    # New line - add to our tracking and display
-                    active_lines.append(paragraph_num)
-                    print(line_content)
-                else:
-                    # Update existing line - find its position and update in place
-                    try:
-                        line_index = active_lines.index(paragraph_num)
-                        # Calculate how many lines to move up from current position
-                        lines_to_move_up = len(active_lines) - line_index
-                        
-                        # Move up, clear line, write new content, move back down
-                        print(f"\033[{lines_to_move_up}A\033[2K\r{line_content}\033[{lines_to_move_up}B")
-                        
-                    except ValueError:
-                        # Fallback if line not found - just print
-                        print(line_content)
+                # Assign slot if this is a new paragraph
+                if paragraph_num not in slot_assignments:
+                    slot_assignments[paragraph_num] = next_available_slot
+                    next_available_slot = (next_available_slot + 1) % 8
                 
-                # Clean up completed lines to prevent infinite growth
-                if is_final and len(active_lines) > 10:
-                    # Remove oldest completed lines, keeping last 10
-                    lines_to_remove = len(active_lines) - 10
-                    for _ in range(lines_to_remove):
-                        if active_lines:
-                            active_lines.pop(0)
-                            # Clear the top line by moving up and clearing
-                            print(f"\033[{len(active_lines)+1}A\033[2K\033[{len(active_lines)+1}B")
+                # Update the content in assigned slot
+                slot_index = slot_assignments[paragraph_num]
+                display_window[slot_index] = line_content
+                
+                # If this is the first update, just print the initial window
+                if not window_initialized:
+                    for line in display_window:
+                        print(line if line else "")
+                    window_initialized = True
+                else:
+                    # Update the display window in place
+                    # Move cursor up 8 lines to start of window
+                    print(f"\033[8A", end="")
+                    
+                    # Redraw all 8 lines
+                    for i, line in enumerate(display_window):
+                        # Clear line and write content
+                        if i == 7:  # Last line
+                            print(f"\033[2K{line if line else ''}")
+                        else:
+                            print(f"\033[2K{line if line else ''}")
+                
+                # Clean up completed assignments
+                if is_final:
+                    # Clear the slot for reuse
+                    display_window[slot_index] = ""
+                    if paragraph_num in slot_assignments:
+                        del slot_assignments[paragraph_num]
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
