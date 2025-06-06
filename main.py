@@ -756,7 +756,7 @@ Text: "{text}" """
                 
                 # CRITICAL: DON'T remove completed lines - keep them visible!
                 # This was the core issue - completed results were disappearing
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
             paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)  # Copy for safe iteration
             
@@ -770,7 +770,7 @@ Text: "{text}" """
                 return False
             
             # Start initial batch of Model 1 evaluations (up to 8)
-            for _ in range(min(8, len(paragraph_queue))):
+            for _ in range(min(3, len(paragraph_queue))):
                 start_next_stanza_if_available()
             
             # Process results as they complete and keep queue flowing
