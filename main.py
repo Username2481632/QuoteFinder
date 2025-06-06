@@ -704,9 +704,11 @@ Text: "{text}" """
         """Process all paragraphs continuously with up to 8 concurrent evaluations."""
         import sys
         
-        # Track state for each stanza
+        # Track state for each stanza and line positions
         stanza_states = {}
         completed_stanzas = set()
+        line_tracker = {}  # Maps paragraph_num to line_number relative to current cursor
+        current_line = 0
         
         # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
@@ -714,7 +716,7 @@ Text: "{text}" """
                 'paragraph': paragraph,
                 'decisions': [],
                 'final_result': None,
-                'displayed': False
+                'line_assigned': False
             }
 
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -747,7 +749,8 @@ Text: "{text}" """
                             # Rejected - finalize this stanza
                             state['decisions'][-1] += " → rejected"
                             state['final_result'] = (response, confidence, "")
-                            self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
+                            self._update_or_create_line(paragraph_num, state, content_type, total_paragraphs, 
+                                                      line_tracker, current_line, paragraphs, final=True)
                             completed_stanzas.add(paragraph_num)
                             
                             # Start next paragraph from queue if available
@@ -757,14 +760,9 @@ Text: "{text}" """
                                 active_futures[next_future] = (next_paragraph_num, 0)
                             
                         elif model_idx + 1 < len(self.model_names):
-                            # Continue to next model
-                            decisions_str = " | ".join(state['decisions'])
-                            if not state['displayed']:
-                                print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}")
-                                state['displayed'] = True
-                            else:
-                                # Update existing line
-                                print(f"\r  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}", end='', flush=True)
+                            # Continue to next model - show intermediate progress
+                            self._update_or_create_line(paragraph_num, state, content_type, total_paragraphs,
+                                                      line_tracker, current_line, paragraphs, final=False)
                             
                             # Submit next model
                             is_final_model = (model_idx + 1 == len(self.model_names) - 1)
@@ -780,12 +778,8 @@ Text: "{text}" """
                             # All models approved - finalize
                             state['decisions'].append(f"→ All {len(self.model_names)} approved")
                             state['final_result'] = (response, 0.95, explanation)
-                            
-                            # Clear current line if we were updating it
-                            if state['displayed']:
-                                print()  # Move to new line
-                                
-                            self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
+                            self._update_or_create_line(paragraph_num, state, content_type, total_paragraphs,
+                                                      line_tracker, current_line, paragraphs, final=True)
                             completed_stanzas.add(paragraph_num)
                             
                             # Start next paragraph from queue if available
@@ -800,12 +794,8 @@ Text: "{text}" """
                         
                         state = stanza_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
-                        
-                        # Clear current line if we were updating it
-                        if state['displayed']:
-                            print()  # Move to new line
-                            
-                        self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
+                        self._update_or_create_line(paragraph_num, state, content_type, total_paragraphs,
+                                                  line_tracker, current_line, paragraphs, final=True)
                         completed_stanzas.add(paragraph_num)
                         
                         # Start next paragraph from queue if available
@@ -813,6 +803,59 @@ Text: "{text}" """
                             next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
                             next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
                             active_futures[next_future] = (next_paragraph_num, 0)
+    
+    def _update_or_create_line(self, paragraph_num, state, content_type, total_paragraphs, line_tracker, current_line, paragraphs, final=False):
+        """Update existing line or create new one using ANSI cursor control."""
+        import sys
+        
+        # Build the line content
+        decisions_str = " | ".join(state['decisions'])
+        
+        if final:
+            # Add final result status
+            response, confidence, explanation = state['final_result']
+            self.current_paragraph = paragraph_num
+            self.current_total_processed += 1
+            
+            if response == '1':
+                self.current_total_found += 1
+                self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
+                result_status = f"● found (conf: {confidence:.2f})"
+            else:
+                result_status = f"○ skip (conf: {confidence:.2f})"
+            
+            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
+            
+            # Save progress
+            progress = {
+                "last_paragraph": paragraph_num,
+                "total_processed": self.current_total_processed,
+                "total_found": self.current_total_found
+            }
+            self.save_progress(progress)
+        else:
+            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}"
+        
+        if paragraph_num in line_tracker:
+            # Update existing line
+            lines_up = line_tracker[paragraph_num]
+            if lines_up > 0:
+                sys.stdout.write(f"\033[{lines_up}A")  # Move cursor up
+            sys.stdout.write("\033[2K")  # Clear entire line
+            sys.stdout.write(f"{line_content}\n")  # Write new content
+            if lines_up > 0:
+                sys.stdout.write(f"\033[{lines_up}B")  # Move cursor back down
+        else:
+            # Create new line
+            sys.stdout.write(f"{line_content}\n")
+            line_tracker[paragraph_num] = 0  # This line is now at cursor position
+            
+        # Update line positions for all tracked lines
+        for pnum in line_tracker:
+            if pnum != paragraph_num:
+                line_tracker[pnum] += 1
+                
+        sys.stdout.flush()
     
     def _display_final_result_continuous(self, state, paragraph_num, total_paragraphs, content_type, paragraphs):
         """Display the final result for a stanza in continuous processing."""
