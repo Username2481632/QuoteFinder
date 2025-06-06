@@ -517,7 +517,10 @@ Text: "{text}" """
             
             try:
                 # Process all paragraphs continuously
-                self._process_paragraphs_continuously(remaining_paragraphs, paragraphs, content_type, total_paragraphs)
+                if self.verbose:
+                    self._process_paragraphs_continuously_verbose(remaining_paragraphs, paragraphs, content_type, total_paragraphs)
+                else:
+                    self._process_paragraphs_continuously(remaining_paragraphs, paragraphs, content_type, total_paragraphs)
                 
                 # Update totals based on what was actually processed
                 total_processed = self.current_total_processed
@@ -700,14 +703,15 @@ Text: "{text}" """
         results.sort(key=lambda x: x[0])
         return results
 
-    def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
+    def _process_paragraphs_continuously_verbose(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
         """Process all paragraphs continuously with up to 8 concurrent evaluations."""
         import threading
         from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
         
         # Thread-safe state management
         stanza_states: Dict[int, Dict[str, Any]] = {}
-        completed_stanzas: set[int] = set()
+        completed_stanzas: List[int] = []  # Ordered list of completed stanzas
+        active_processes: Dict[int, str] = {}  # Currently processing stanzas
         display_lock: threading.Lock = threading.Lock()
         
         # Initialize all paragraph states
@@ -717,89 +721,63 @@ Text: "{text}" """
                 'decisions': [],
                 'final_result': None
             }
-
-        # Display management for completed stanzas + live status window
-        completed_stanzas_display: List[str] = []
-        active_window = [""] * 8  # 8 slots for 8 workers
-        slot_assignments = {}      # Maps paragraph_num to slot_index
-        next_available_slot = 0    # Next slot to assign
-        status_window_active = False
-
-        def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Display completed stanzas above + live status window below."""
-            nonlocal next_available_slot, status_window_active
-            
+        
+        # Initialize display with "Active Processes:" header
+        print("Active Processes:")
+        for i in range(8):
+            print("")  # Reserve 8 lines for active processes
+        
+        def update_display() -> None:
+            """Update the entire display: completed lines + active processes."""
             with display_lock:
-                if is_final:
-                    # This stanza is complete - add to completed list
-                    completed_stanzas_display.append(line_content)
-                    
-                    # Clean up from active window
-                    if paragraph_num in slot_assignments:
-                        slot_index = slot_assignments[paragraph_num]
-                        active_window[slot_index] = ""
-                        del slot_assignments[paragraph_num]
-                    
-                    # Print the completed stanza above the status window
-                    if status_window_active:
-                        # Move up past the status window, print the completed line, then redraw window
-                        print(f"\033[8A", end="")  # Move up past 8-line window
-                        print(f"\033[1L", end="")  # Insert a new line at top
-                        print(f"{line_content}")   # Print completed stanza
-                        
-                        # Redraw the active status window
-                        for i, active_line in enumerate(active_window):
-                            if i == 7:  # Last line
-                                print(f"\033[2K{active_line if active_line else ''}")
-                            else:
-                                print(f"\033[2K{active_line if active_line else ''}")
-                    else:
-                        # No status window yet, just print normally
-                        print(line_content)
+                # Calculate total lines to clear (completed + "Active Processes:" header + 8 active lines)
+                total_lines = len(completed_stanzas) + 1 + 8
                 
-                else:
-                    # This is an active/updating stanza - update status window
-                    
-                    # Assign slot if this is a new paragraph
-                    if paragraph_num not in slot_assignments:
-                        slot_assignments[paragraph_num] = next_available_slot
-                        next_available_slot = (next_available_slot + 1) % 8
-                    
-                    # Update the content in assigned slot
-                    slot_index = slot_assignments[paragraph_num]
-                    active_window[slot_index] = line_content
-                    
-                    # Initialize or update the status window
-                    if not status_window_active:
-                        # First time - print the initial window
-                        for i, line in enumerate(active_window):
-                            if i == 7:  # Last line
-                                print(f"{line if line else ''}")
-                            else:
-                                print(f"{line if line else ''}")
-                        status_window_active = True
+                # Move cursor up to start of display and clear everything
+                if total_lines > 0:
+                    sys.stdout.write(f"\033[{total_lines}A")
+                
+                # Print all completed stanzas in order
+                for stanza_num in completed_stanzas:
+                    state = stanza_states[stanza_num]
+                    decisions_str = " | ".join(state['decisions'])
+                    response, confidence, explanation = state['final_result']
+                    result_status = f"● found (conf: {confidence:.2f})" if response == self.positive_label else f"○ skip (conf: {confidence:.2f})"
+                    print(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}")
+                
+                # Print "Active Processes:" header
+                print("Active Processes:")
+                
+                # Print current active processes (up to 8)
+                active_list = list(active_processes.items())
+                for i in range(8):
+                    if i < len(active_list):
+                        stanza_num, status = active_list[i]
+                        print(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {status}")
                     else:
-                        # Update the status window in place
-                        print(f"\033[8A", end="")  # Move up to start of window
-                        
-                        # Redraw all 8 lines
-                        for i, line in enumerate(active_window):
-                            if i == 7:  # Last line
-                                print(f"\033[2K{line if line else ''}")
-                            else:
-                                print(f"\033[2K{line if line else ''}")
+                        print("  [waiting...]")
+                
+                sys.stdout.flush()
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
-            paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)  # Copy for safe iteration
+            paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)
             
             def start_next_stanza_if_available() -> bool:
                 """Start the next stanza from queue if available. Returns True if started."""
                 if paragraph_queue and self.model_names:
-                    next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                    next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
-                    active_futures[next_future] = (next_paragraph_num, 0)
-                    return True
+                    try:
+                        next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                        active_futures[next_future] = (next_paragraph_num, 0)
+                        # Update active processes display
+                        active_processes[next_paragraph_num] = "Model 1: processing..."
+                        update_display()
+                        return True
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"\nError starting next stanza: {e}")
+                        return False
                 return False
             
             # Start initial batch of Model 1 evaluations (up to 8)
@@ -820,6 +798,7 @@ Text: "{text}" """
                         response, confidence, explanation = future.result()
                         state = stanza_states[paragraph_num]
                         state['decisions'].append(f"Model {model_idx + 1}: {response}")
+                        decisions_str = " | ".join(state['decisions'])
                         
                         if response == self.negative_label:
                             # Rejected - finalize this stanza
@@ -829,14 +808,12 @@ Text: "{text}" """
                             # Update progress tracking
                             self.current_paragraph = paragraph_num
                             self.current_total_processed += 1
-                            result_status = f"○ skip (conf: {confidence:.2f})"
                             
-                            # Update display with final result
-                            decisions_str = " | ".join(state['decisions'])
-                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_line(paragraph_num, line_content, is_final=True)
-                            
-                            completed_stanzas.add(paragraph_num)
+                            # Move to completed and remove from active
+                            completed_stanzas.append(paragraph_num)
+                            if paragraph_num in active_processes:
+                                del active_processes[paragraph_num]
+                            update_display()
                             
                             # Save progress
                             progress = {
@@ -846,14 +823,13 @@ Text: "{text}" """
                             }
                             self.save_progress(progress)
                             
-                            # ALWAYS start next paragraph when ANY stanza completes (rejected)
+                            # Start next paragraph
                             start_next_stanza_if_available()
                             
                         elif model_idx + 1 < len(self.model_names):
-                            # Continue to next model - show intermediate progress
-                            decisions_str = " | ".join(state['decisions'])
-                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}"
-                            update_line(paragraph_num, line_content, is_final=False)
+                            # Continue to next model
+                            active_processes[paragraph_num] = decisions_str
+                            update_display()
                             
                             # Submit next model
                             is_final_model = (model_idx + 1 == len(self.model_names) - 1)
@@ -865,7 +841,7 @@ Text: "{text}" """
                             )
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
-                            # CRITICAL: Start new stanza when continuing to next model
+                            # Start new stanza
                             start_next_stanza_if_available()
                             
                         else:
@@ -878,14 +854,12 @@ Text: "{text}" """
                             self.current_total_processed += 1
                             self.current_total_found += 1
                             self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, explanation)
-                            result_status = f"● found (conf: 0.95)"
                             
-                            # Update display with final result
-                            decisions_str = " | ".join(state['decisions'])
-                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_line(paragraph_num, line_content, is_final=True)
-                            
-                            completed_stanzas.add(paragraph_num)
+                            # Move to completed and remove from active
+                            completed_stanzas.append(paragraph_num)
+                            if paragraph_num in active_processes:
+                                del active_processes[paragraph_num]
+                            update_display()
                             
                             # Save progress
                             progress = {
@@ -895,7 +869,7 @@ Text: "{text}" """
                             }
                             self.save_progress(progress)
                             
-                            # ALWAYS start next paragraph when ANY stanza completes (approved)
+                            # Start next paragraph
                             start_next_stanza_if_available()
                         
                     except Exception as e:
@@ -904,14 +878,116 @@ Text: "{text}" """
                         
                         state = stanza_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
+                        completed_stanzas.append(paragraph_num)
+                        if paragraph_num in active_processes:
+                            del active_processes[paragraph_num]
+                        update_display()
+                        start_next_stanza_if_available()
+
+    def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
+        """Process all paragraphs continuously with up to 8 concurrent evaluations (non-verbose mode)."""
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+        
+        # Simple state management for non-verbose mode
+        processed_count = 0
+        found_count = 0
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            active_futures: Dict[Any, Tuple[int, int]] = {}
+            paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)
+            
+            def start_next_stanza_if_available() -> bool:
+                """Start the next stanza from queue if available. Returns True if started."""
+                if paragraph_queue and self.model_names:
+                    try:
+                        next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                        active_futures[next_future] = (next_paragraph_num, 0)
+                        return True
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"\nError starting next stanza: {e}")
+                        return False
+                return False
+            
+            # Start initial batch of Model 1 evaluations (up to 8)
+            for _ in range(min(8, len(paragraph_queue))):
+                start_next_stanza_if_available()
+            
+            # Process results as they complete and keep queue flowing
+            while active_futures and not self.cancelled:
+                done, _ = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
+                
+                for future in done:
+                    paragraph_num, model_idx = active_futures.pop(future)
+                    
+                    try:
+                        response, confidence, explanation = future.result()
                         
-                        # Update display with error
-                        line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Error → ○ skip"
-                        update_line(paragraph_num, line_content, is_final=True)
+                        if response == self.negative_label:
+                            # Rejected - finalize this stanza
+                            processed_count += 1
+                            self.current_paragraph = paragraph_num
+                            self.current_total_processed += 1
+                            
+                            # Update progress bar
+                            self._update_progress(processed_count, len(paragraph_list), found_count)
+                            
+                            # Save progress
+                            progress = {
+                                "last_paragraph": paragraph_num,
+                                "total_processed": self.current_total_processed,
+                                "total_found": self.current_total_found
+                            }
+                            self.save_progress(progress)
+                            
+                            # Start next paragraph
+                            start_next_stanza_if_available()
+                            
+                        elif model_idx + 1 < len(self.model_names):
+                            # Continue to next model
+                            is_final_model = (model_idx + 1 == len(self.model_names) - 1)
+                            next_future = executor.submit(
+                                self.classify_text, 
+                                paragraphs[paragraph_num], 
+                                self.model_names[model_idx + 1], 
+                                need_explanation=is_final_model
+                            )
+                            active_futures[next_future] = (paragraph_num, model_idx + 1)
+                            
+                            # Start new stanza
+                            start_next_stanza_if_available()
+                            
+                        else:
+                            # All models approved - finalize
+                            processed_count += 1
+                            found_count += 1
+                            self.current_paragraph = paragraph_num
+                            self.current_total_processed += 1
+                            self.current_total_found += 1
+                            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, explanation)
+                            
+                            # Update progress bar
+                            self._update_progress(processed_count, len(paragraph_list), found_count)
+                            
+                            # Save progress
+                            progress = {
+                                "last_paragraph": paragraph_num,
+                                "total_processed": self.current_total_processed,
+                                "total_found": self.current_total_found
+                            }
+                            self.save_progress(progress)
+                            
+                            # Start next paragraph
+                            start_next_stanza_if_available()
                         
-                        completed_stanzas.add(paragraph_num)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
                         
-                        # ALWAYS start next paragraph when ANY stanza completes (error)
+                        processed_count += 1
+                        self.current_total_processed += 1
+                        self._update_progress(processed_count, len(paragraph_list), found_count)
                         start_next_stanza_if_available()
 
 
