@@ -42,7 +42,17 @@ class TextClassifier:
             directory: If provided, use this specific directory number
         """
         self.config = self._load_config(config_file)
-        self.model_name = self.config['model_name']
+        
+        # Support model_names configuration
+        if 'model_names' not in self.config:
+            raise ValueError("Configuration must contain 'model_names' (list of model names)")
+            
+        self.model_names = self.config['model_names']
+        if not isinstance(self.model_names, list):
+            raise ValueError("model_names must be a list of model names")
+        if len(self.model_names) == 0:
+            raise ValueError("model_names cannot be empty")
+            
         self.verbose = verbose
         self.simple = simple
         self.restart = restart
@@ -83,7 +93,7 @@ class TextClassifier:
             raise ValueError(f"Invalid JSON in configuration file '{config_file}': {e}")
         
         # Validate required fields
-        required_fields = ['model_name', 'target_file', 'search_criteria']
+        required_fields = ['model_names', 'target_file', 'search_criteria']
         missing_fields = [field for field in required_fields if field not in config]
         
         if missing_fields:
@@ -235,7 +245,7 @@ class TextClassifier:
         
         return stanzas
 
-    def classify_text(self, text: str) -> tuple[str, float, str]:
+    def classify_text(self, text: str, model_name: str) -> tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build full prompt from the classification description
         combined_prompt = f"""Does this text match the following criteria:
@@ -258,7 +268,7 @@ Text: "{text}" """
                 print(f"Attempt {attempt}/{max_attempts}...")
             
             response = ollama.chat(
-                model=self.model_name,
+                model=model_name,
                 messages=[{
                     'role': 'user',
                     'content': combined_prompt
@@ -320,15 +330,15 @@ Text: "{text}" """
             # Final attempt failed - use probability resolution
             if self.verbose:
                 print(f"Unclear response after {max_attempts} attempts: '{final_answer}' - checking probabilities...")
-            return self._resolve_by_probability(combined_prompt)
+            return self._resolve_by_probability(combined_prompt, model_name)
         
         # Should never reach here
         raise RuntimeError("Failed to get clear response after all attempts")
     
-    def _resolve_by_probability(self, prompt: str) -> tuple[str, float, str]:
+    def _resolve_by_probability(self, prompt: str, model_name: str) -> tuple[str, float, str]:
         """When response is unclear, compare probabilities of each label."""
-        prob_positive = self._get_label_probability(prompt, self.positive_label)
-        prob_negative = self._get_label_probability(prompt, self.negative_label)
+        prob_positive = self._get_label_probability(prompt, self.positive_label, model_name)
+        prob_negative = self._get_label_probability(prompt, self.negative_label, model_name)
         
         total_prob = prob_positive + prob_negative
         if total_prob == 0:
@@ -343,14 +353,14 @@ Text: "{text}" """
         else:
             return self.negative_label, norm_prob_negative, ""
     
-    def _get_label_probability(self, prompt: str, label: str) -> float:
+    def _get_label_probability(self, prompt: str, label: str, model_name: str) -> float:
         """Get probability of a specific label by sampling multiple times."""
         matches = 0
         total_samples = 5
         
         for _ in range(total_samples):
             response = ollama.chat(
-                model=self.model_name,
+                model=model_name,
                 messages=[{
                     'role': 'user',
                     'content': prompt
@@ -376,6 +386,42 @@ Text: "{text}" """
                 matches += 1
         
         return matches / total_samples
+
+    def classify_with_cascade(self, text: str) -> tuple[str, float, str]:
+        """
+        Classify text using cascade verification with multiple models.
+        First model detects positives, subsequent models verify them.
+        Returns final classification after all models agree.
+        """
+        if len(self.model_names) == 1:
+            # Single model - use standard classification
+            return self.classify_text(text, self.model_names[0])
+        
+        # Multi-model cascade verification
+        explanations = []
+        
+        for i, model_name in enumerate(self.model_names):
+            response, confidence, explanation = self.classify_text(text, model_name)
+            
+            if self.verbose:
+                print(f"    Model {i+1} ({model_name}): {response} (conf: {confidence:.2f})")
+            
+            if response == self.negative_label:
+                # If any model in the cascade says negative, reject
+                if self.verbose:
+                    print(f"    Cascade rejected by model {i+1}")
+                return self.negative_label, confidence, ""
+            
+            # Model said positive, collect explanation and continue
+            if explanation:
+                explanations.append(f"Model {i+1}: {explanation}")
+        
+        # All models agreed it's positive
+        combined_explanation = " | ".join(explanations) if explanations else "Match detected by cascade verification."
+        if self.verbose:
+            print(f"    Cascade approved by all {len(self.model_names)} models")
+        
+        return self.positive_label, 0.95, combined_explanation
 
     def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, int]:
         """
@@ -625,7 +671,7 @@ Text: "{text}" """
         def process_single_paragraph(paragraph_info):
             paragraph_num, paragraph = paragraph_info
             try:
-                response, confidence, explanation = self.classify_text(paragraph)
+                response, confidence, explanation = self.classify_with_cascade(paragraph)
                 return (paragraph_num, response, confidence, explanation)
             except Exception as e:
                 if self.verbose:
@@ -659,19 +705,36 @@ Text: "{text}" """
         results.sort(key=lambda x: x[0])
         return results
 
-def verify_model_available(model_name: str):
-    """Verify that the specified model is available in Ollama."""
+def verify_models_available(model_names: Union[str, List[str]]):
+    """Verify that the specified model(s) are available in Ollama."""
     models_response = ollama.list()
     
     # Extract model names from the response
-    model_names = [model.model for model in models_response.models]
+    available_models = [model.model for model in models_response.models]
     
-    print(f"Available models: {model_names}")
+    print(f"Available models: {available_models}")
     
-    if model_name not in model_names:
-        raise ValueError(f"Model '{model_name}' not found. Available models: {', '.join(model_names)}. Run: ollama pull {model_name}")
+    # Support both single model (backward compatibility) and multiple models
+    if isinstance(model_names, str):
+        models_to_check = [model_names]
+    else:
+        models_to_check = model_names
     
-    print(f"Using model: {model_name}")
+    missing_models = []
+    for model_name in models_to_check:
+        if model_name not in available_models:
+            missing_models.append(model_name)
+    
+    if missing_models:
+        missing_str = ', '.join(missing_models)
+        available_str = ', '.join(available_models)
+        pull_commands = ' && '.join([f"ollama pull {model}" for model in missing_models])
+        raise ValueError(f"Model(s) {missing_str} not found. Available models: {available_str}. Run: {pull_commands}")
+    
+    if len(models_to_check) == 1:
+        print(f"Using model: {models_to_check[0]}")
+    else:
+        print(f"Using cascade verification with models: {' → '.join(models_to_check)}")
 
 
 def is_ollama_running() -> bool:
@@ -758,8 +821,8 @@ def main():
         print(f"Configuration Error: {e}")
         sys.exit(1)
     
-    # Check if model is available
-    verify_model_available(classifier.model_name)
+    # Check if models are available and preload them
+    verify_models_available(classifier.model_names)
     
     # Set up signal handler for graceful cancellation
     global classifier_instance
