@@ -100,7 +100,18 @@ class TextClassifier:
             raise ValueError(f"Configuration file '{config_file}' is missing required fields: {', '.join(missing_fields)}")
         
         # Validate that fields are not empty
-        empty_fields = [field for field in required_fields if not config[field].strip()]
+        empty_fields = []
+        for field in required_fields:
+            value = config[field]
+            if field == 'model_names':
+                # model_names should be a non-empty list
+                if not isinstance(value, list) or len(value) == 0:
+                    empty_fields.append(field)
+            else:
+                # Other fields should be non-empty strings
+                if not value or not value.strip():
+                    empty_fields.append(field)
+        
         if empty_fields:
             raise ValueError(f"Configuration file '{config_file}' has empty values for: {', '.join(empty_fields)}")
         
