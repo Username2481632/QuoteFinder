@@ -708,62 +708,62 @@ Text: "{text}" """
         import threading
         from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
         
-        # Thread-safe state management
+        # Thread-safe state management with scrolling window
         stanza_states: Dict[int, Dict[str, Any]] = {}
         completed_stanzas: set[int] = set()  # Track which stanzas are completed
         active_processes: Dict[int, str] = {}  # Currently processing stanzas
         display_lock: threading.Lock = threading.Lock()
-        all_stanza_lines: Dict[int, int] = {}  # Map stanza_num to line number in display
         
-        # Initialize all paragraph states and display
-        line_num = 0
+        # Scrolling window for display (show last N completed + active processes)
+        MAX_COMPLETED_DISPLAY = 20  # Show only last 20 completed items
+        recent_completed: List[int] = []  # Recently completed stanzas in order
+        
+        # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
             stanza_states[paragraph_num] = {
                 'paragraph': paragraph,
                 'decisions': [],
                 'final_result': None
             }
-            all_stanza_lines[paragraph_num] = line_num
-            print(f"  {content_type[:-1].capitalize()} {paragraph_num + 1}/{total_paragraphs}: waiting...")
-            line_num += 1
         
-        # Add separator and active processes section
-        separator_line = line_num
+        # Initialize display
+        print("Recent Completions:")
+        for i in range(MAX_COMPLETED_DISPLAY):
+            print("  [waiting...]")
+        
         print("\nActive Processes:")
-        line_num += 2
-        
-        active_processes_start_line = line_num
         for i in range(8):
-            print("  [waiting...]")  # Reserve 8 lines for active processes
-            line_num += 1
+            print("  [waiting...]")
         
-        def update_stanza_line(stanza_num: int, status: str, is_completed: bool = False) -> None:
-            """Update a specific stanza line."""
+        def update_display() -> None:
+            """Update the scrolling display: recent completions + active processes."""
             with display_lock:
-                target_line = all_stanza_lines[stanza_num]
-                current_line = len(paragraph_list) + 2 + 8  # We're at the bottom
-                lines_to_move_up = current_line - target_line
+                # Calculate lines to move up (20 completed + 1 separator + 8 active = 29 lines)
+                total_lines = MAX_COMPLETED_DISPLAY + 1 + 8
                 
-                # Move to target line
-                sys.stdout.write(f"\033[{lines_to_move_up}A")
+                # Move to start of display
+                sys.stdout.write(f"\033[{total_lines}A")
+                
+                # Update recent completions section
                 sys.stdout.write("\033[2K")  # Clear line
-                sys.stdout.write(status + "\n")
+                sys.stdout.write("Recent Completions:\n")
                 
-                # Move back to bottom
-                sys.stdout.write(f"\033[{lines_to_move_up - 1}B")
-                sys.stdout.flush()
-        
-        def update_active_processes_section() -> None:
-            """Update the active processes section."""
-            with display_lock:
-                # Move to active processes section
-                current_line = len(paragraph_list) + 2 + 8  # We're at the bottom
-                active_section_start = active_processes_start_line
-                lines_to_move_up = current_line - active_section_start
+                for i in range(MAX_COMPLETED_DISPLAY):
+                    sys.stdout.write("\033[2K")  # Clear line
+                    if i < len(recent_completed):
+                        stanza_num = recent_completed[-(i+1)]  # Show most recent first
+                        state = stanza_states[stanza_num]
+                        decisions_str = " | ".join(state['decisions'])
+                        response, confidence, _ = state['final_result']
+                        result_status = f"● found (conf: {confidence:.2f})" if response == self.positive_label else f"○ skip (conf: {confidence:.2f})"
+                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
+                    else:
+                        sys.stdout.write("  [waiting...]\n")
                 
-                sys.stdout.write(f"\033[{lines_to_move_up}A")
+                # Update active processes section
+                sys.stdout.write("\033[2K")  # Clear line
+                sys.stdout.write("\nActive Processes:\n")
                 
-                # Update each active process line
                 active_list = list(active_processes.items())
                 for i in range(8):
                     sys.stdout.write("\033[2K")  # Clear line
@@ -774,6 +774,13 @@ Text: "{text}" """
                         sys.stdout.write("  [waiting...]\n")
                 
                 sys.stdout.flush()
+        
+        def add_completed_stanza(stanza_num: int) -> None:
+            """Add a stanza to the completed list, maintaining the scrolling window."""
+            recent_completed.append(stanza_num)
+            # Keep only the most recent items
+            if len(recent_completed) > MAX_COMPLETED_DISPLAY:
+                recent_completed.pop(0)
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
@@ -788,7 +795,7 @@ Text: "{text}" """
                         active_futures[next_future] = (next_paragraph_num, 0)
                         # Update active processes display
                         active_processes[next_paragraph_num] = "Model 1: processing..."
-                        update_active_processes_section()
+                        update_display()
                         return True
                     except Exception as e:
                         if self.verbose:
@@ -830,13 +837,9 @@ Text: "{text}" """
                             if paragraph_num in active_processes:
                                 del active_processes[paragraph_num]
                             
-                            # Update the specific stanza line and active processes
-                            state = stanza_states[paragraph_num]
-                            decisions_str = " | ".join(state['decisions'])
-                            result_status = f"○ skip (conf: {confidence:.2f})"
-                            status_line = f"  {content_type[:-1].capitalize()} {paragraph_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_stanza_line(paragraph_num, status_line, True)
-                            update_active_processes_section()
+                            # Add to recent completed and update display
+                            add_completed_stanza(paragraph_num)
+                            update_display()
                             
                             # Save progress
                             progress = {
@@ -853,7 +856,7 @@ Text: "{text}" """
                             # Continue to next model
                             next_model_status = f"{decisions_str} | Model {model_idx + 2}: processing..."
                             active_processes[paragraph_num] = next_model_status
-                            update_active_processes_section()
+                            update_display()
                             
                             # Submit next model
                             is_final_model = (model_idx + 1 == len(self.model_names) - 1)
@@ -884,13 +887,9 @@ Text: "{text}" """
                             if paragraph_num in active_processes:
                                 del active_processes[paragraph_num]
                             
-                            # Update the specific stanza line and active processes
-                            state = stanza_states[paragraph_num]
-                            decisions_str = " | ".join(state['decisions'])
-                            result_status = f"● found (conf: 0.95)"
-                            status_line = f"  {content_type[:-1].capitalize()} {paragraph_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_stanza_line(paragraph_num, status_line, True)
-                            update_active_processes_section()
+                            # Add to recent completed and update display
+                            add_completed_stanza(paragraph_num)
+                            update_display()
                             
                             # Save progress
                             progress = {
@@ -913,10 +912,9 @@ Text: "{text}" """
                         if paragraph_num in active_processes:
                             del active_processes[paragraph_num]
                         
-                        # Update the specific stanza line and active processes
-                        status_line = f"  {content_type[:-1].capitalize()} {paragraph_num + 1}/{total_paragraphs}: Error → ○ skip"
-                        update_stanza_line(paragraph_num, status_line, True)
-                        update_active_processes_section()
+                        # Add to recent completed and update display
+                        add_completed_stanza(paragraph_num)
+                        update_display()
                         start_next_stanza_if_available()
 
     def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
