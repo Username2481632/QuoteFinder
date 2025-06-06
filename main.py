@@ -540,8 +540,8 @@ Text: "{text}" """
                     print(f"\nBatch {batch_num}/{total_batches}")
                 
                 try:
-                    # Process batch in parallel with real-time updates
-                    self._process_paragraph_batch_realtime(batch_data, paragraphs, content_type, total_paragraphs, total_processed, total_found)
+                    # Process batch with real-time cascade visualization
+                    self._process_batch_with_live_cascade(batch_data, paragraphs, content_type, total_paragraphs)
                     
                     # Update totals based on what was actually processed
                     total_processed = self.current_total_processed
@@ -728,84 +728,139 @@ Text: "{text}" """
         results.sort(key=lambda x: x[0])
         return results
 
-    def _process_paragraph_batch_realtime(self, batch_data, paragraphs, content_type, total_paragraphs, total_processed_start, total_found_start):
-        """Process paragraph batch with real-time result display."""
+    def _process_batch_with_live_cascade(self, batch_data, paragraphs, content_type, total_paragraphs):
+        """Process batch with live cascade visualization - each model call is separate."""
+        import sys
+        from collections import defaultdict
         
-        # Track active lines for overwriting
-        active_lines = {}  # paragraph_num -> line content
+        # Track state for each stanza
+        stanza_states = {}
+        completed_stanzas = set()
         
-        def progress_callback(stanza_info, cascade_info, is_match, final=False):
-            """Callback for real-time progress updates with line overwriting."""
-            if not self.verbose:
-                return  # Only do real-time updates in verbose mode
-                
-            if final:
-                # Final result - add outcome and newline
-                if is_match:
-                    result_status = "● found (conf: 0.95)"
-                else:
-                    result_status = "○ skip (conf: 0.95)"
-                line = f"  {stanza_info}: {cascade_info} → {result_status}"
-                print(f"\r{line}")  # Overwrite and commit with newline
-            else:
-                # In-progress update - overwrite without newline
-                line = f"  {stanza_info}: {cascade_info}..."
-                print(f"\r{line}", end='', flush=True)
-        
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            def process_single_paragraph(paragraph_info):
-                paragraph_num, paragraph = paragraph_info
-                try:
-                    stanza_info = f"{content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}"
-                    response, confidence, explanation, cascade_info = self.classify_with_cascade(
-                        paragraph, progress_callback, stanza_info
-                    )
-                    return (paragraph_num, response, confidence, explanation, cascade_info)
-                except Exception as e:
-                    if self.verbose:
-                        print(f"\nError processing paragraph {paragraph_num}: {e}")
-                    return (paragraph_num, '0', 0.0, "", "Error")
-
-            # Submit all tasks
-            future_to_paragraph = {
-                executor.submit(process_single_paragraph, para_info): para_info
-                for para_info in batch_data
+        # Initialize display state
+        for i, (paragraph_num, paragraph) in enumerate(batch_data):
+            stanza_states[paragraph_num] = {
+                'paragraph': paragraph,
+                'model_idx': 0,
+                'decisions': [],
+                'final_result': None,
+                'line_num': i
             }
+            # Print initial placeholder line
+            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Processing...")
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:  # More workers for model-level parallelism
+            # Submit initial Model 1 tasks for all stanzas
+            active_futures = {}
+            
+            for paragraph_num, paragraph in batch_data:
+                if len(self.model_names) > 0:
+                    future = executor.submit(self.classify_text, paragraph, self.model_names[0], need_explanation=False)
+                    active_futures[future] = (paragraph_num, 0)  # (stanza_num, model_idx)
             
             # Process results as they complete
-            for future in as_completed(future_to_paragraph):
-                if self.cancelled:
+            while active_futures and not self.cancelled:
+                for future in as_completed(active_futures):
+                    paragraph_num, model_idx = active_futures[future]
+                    del active_futures[future]
+                    
+                    if paragraph_num in completed_stanzas:
+                        continue
+                    
+                    try:
+                        response, confidence, explanation = future.result()
+                        state = stanza_states[paragraph_num]
+                        state['decisions'].append(f"Model {model_idx + 1}: {response}")
+                        
+                        # Update the display line for this stanza
+                        self._update_stanza_display_line(state, paragraph_num, total_paragraphs, content_type, len(batch_data))
+                        
+                        if response == self.negative_label:
+                            # Rejected - finalize this stanza
+                            state['decisions'][-1] += " → rejected"
+                            state['final_result'] = (response, confidence, "")
+                            self._finalize_stanza_result(state, paragraph_num, total_paragraphs, content_type, paragraphs, len(batch_data))
+                            completed_stanzas.add(paragraph_num)
+                            
+                        elif model_idx + 1 < len(self.model_names):
+                            # Continue to next model
+                            is_final_model = (model_idx + 1 == len(self.model_names) - 1)
+                            next_future = executor.submit(
+                                self.classify_text, 
+                                state['paragraph'], 
+                                self.model_names[model_idx + 1], 
+                                need_explanation=is_final_model
+                            )
+                            active_futures[next_future] = (paragraph_num, model_idx + 1)
+                            state['model_idx'] = model_idx + 1
+                            
+                        else:
+                            # All models approved - finalize
+                            state['decisions'].append(f"→ All {len(self.model_names)} approved")
+                            state['final_result'] = (response, 0.95, explanation)
+                            self._finalize_stanza_result(state, paragraph_num, total_paragraphs, content_type, paragraphs, len(batch_data))
+                            completed_stanzas.add(paragraph_num)
+                        
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
+                        state = stanza_states[paragraph_num]
+                        state['final_result'] = ('0', 0.0, "")
+                        self._finalize_stanza_result(state, paragraph_num, total_paragraphs, content_type, paragraphs, len(batch_data))
+                        completed_stanzas.add(paragraph_num)
+                    
+                    # Break inner loop to restart as_completed with updated active_futures
                     break
-                    
-                paragraph_info = future_to_paragraph[future]
-                try:
-                    result = future.result()
-                    paragraph_num, response, confidence, explanation, cascade_info = result
-                    
-                    # Update progress immediately
-                    self.current_paragraph = paragraph_num
-                    self.current_total_processed += 1
-                    
-                    if response == '1':
-                        self.current_total_found += 1
-                        self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
-                    
-                    # Save progress after each paragraph
-                    progress = {
-                        "last_paragraph": paragraph_num,
-                        "total_processed": self.current_total_processed,
-                        "total_found": self.current_total_found
-                    }
-                    self.save_progress(progress)
-                    
-                except Exception as e:
-                    paragraph_num = paragraph_info[0]
-                    if self.verbose:
-                        print(f"\nError in batch processing for paragraph {paragraph_num}: {e}")
-                    
-                    # Update progress even for errors
-                    self.current_paragraph = paragraph_num
-                    self.current_total_processed += 1
+    
+    def _update_stanza_display_line(self, state, paragraph_num, total_paragraphs, content_type, batch_size):
+        """Update the display line for a stanza with current cascade progress."""
+        import sys
+        
+        line_num = state['line_num']
+        decisions_str = " | ".join(state['decisions'])
+        
+        # Move cursor up to the line and overwrite it
+        sys.stdout.write(f"\033[{batch_size - line_num}A")  # Move cursor up
+        sys.stdout.write(f"\033[2K")  # Clear entire line
+        sys.stdout.write(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}")
+        sys.stdout.write(f"\033[{batch_size - line_num}B")  # Move cursor back down
+        sys.stdout.flush()
+    
+    def _finalize_stanza_result(self, state, paragraph_num, total_paragraphs, content_type, paragraphs, batch_size):
+        """Finalize and display the final result for a stanza."""
+        import sys
+        
+        response, confidence, explanation = state['final_result']
+        
+        # Update progress tracking
+        self.current_paragraph = paragraph_num
+        self.current_total_processed += 1
+        
+        if response == '1':
+            self.current_total_found += 1
+            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
+            result_status = f"● found (conf: {confidence:.2f})"
+        else:
+            result_status = f"○ skip (conf: {confidence:.2f})"
+        
+        # Final display update
+        decisions_str = " | ".join(state['decisions'])
+        line_num = state['line_num']
+        
+        # Move cursor up to the line and overwrite it
+        sys.stdout.write(f"\033[{batch_size - line_num}A")  # Move cursor up
+        sys.stdout.write(f"\033[2K")  # Clear entire line
+        sys.stdout.write(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}\n")
+        sys.stdout.write(f"\033[{batch_size - line_num - 1}B")  # Move cursor back down
+        sys.stdout.flush()
+        
+        # Save progress
+        progress = {
+            "last_paragraph": paragraph_num,
+            "total_processed": self.current_total_processed,
+            "total_found": self.current_total_found
+        }
+        self.save_progress(progress)
 
 def verify_models_available(model_names: Union[str, List[str]]):
     """Verify that the specified model(s) are available in Ollama."""
