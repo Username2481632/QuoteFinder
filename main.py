@@ -708,7 +708,8 @@ Text: "{text}" """
         # Thread-safe state management
         stanza_states = {}
         completed_stanzas = set()
-        display_buffer = {}  # Maps paragraph_num to display_line
+        active_lines = []  # Ordered list of paragraph_nums currently displayed
+        active_lines_status = {}  # Maps paragraph_num to (content, is_completed)
         display_lock = threading.Lock()
         
         # Initialize all paragraph states
@@ -719,26 +720,36 @@ Text: "{text}" """
                 'final_result': None
             }
 
-        def update_display():
-            """Thread-safe display update function."""
+        def update_line(paragraph_num, line_content, is_final=False):
+            """Thread-safe line update with cursor positioning."""
             with display_lock:
-                if not display_buffer:
-                    return
+                if paragraph_num not in active_lines:
+                    # First time displaying this line
+                    active_lines.append(paragraph_num)
+                    active_lines_status[paragraph_num] = (line_content, is_final)
+                    print(line_content)
+                else:
+                    # Update existing line
+                    idx = active_lines.index(paragraph_num)
+                    lines_up = len(active_lines) - idx
                     
-                # Clear existing lines
-                num_lines = len(display_buffer)
-                if num_lines > 0:
-                    # Move up and clear all lines
-                    sys.stdout.write(f"\033[{num_lines}A")
-                    for _ in range(num_lines):
-                        sys.stdout.write("\033[2K\n")
-                    sys.stdout.write(f"\033[{num_lines}A")
+                    # Move cursor up to the target line
+                    sys.stdout.write(f"\033[{lines_up}A")
+                    # Clear the line
+                    sys.stdout.write("\033[2K")
+                    # Write new content
+                    sys.stdout.write(line_content + "\n")
+                    # Move cursor back down
+                    sys.stdout.write(f"\033[{lines_up-1}B")
+                    sys.stdout.flush()
+                    
+                    # Update status
+                    active_lines_status[paragraph_num] = (line_content, is_final)
                 
-                # Redraw all lines in order
-                for paragraph_num in sorted(display_buffer.keys()):
-                    sys.stdout.write(f"{display_buffer[paragraph_num]}\n")
-                    
-                sys.stdout.flush()
+                # Clean up completed stanzas from the front only
+                while active_lines and active_lines_status[active_lines[0]][1]:
+                    completed_paragraph = active_lines.pop(0)
+                    del active_lines_status[completed_paragraph]
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures = {}
@@ -776,17 +787,12 @@ Text: "{text}" """
                             self.current_total_processed += 1
                             result_status = f"○ skip (conf: {confidence:.2f})"
                             
-                            # Update display buffer
+                            # Update display with final result
                             decisions_str = " | ".join(state['decisions'])
-                            with display_lock:
-                                display_buffer[paragraph_num] = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_display()
+                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
+                            update_line(paragraph_num, line_content, is_final=True)
                             
-                            # Remove from active display after brief moment
                             completed_stanzas.add(paragraph_num)
-                            with display_lock:
-                                if paragraph_num in display_buffer:
-                                    del display_buffer[paragraph_num]
                             
                             # Save progress
                             progress = {
@@ -803,11 +809,10 @@ Text: "{text}" """
                                 active_futures[next_future] = (next_paragraph_num, 0)
                             
                         elif model_idx + 1 < len(self.model_names):
-                            # Continue to next model - update intermediate display
+                            # Continue to next model - show intermediate progress
                             decisions_str = " | ".join(state['decisions'])
-                            with display_lock:
-                                display_buffer[paragraph_num] = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}"
-                            update_display()
+                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}"
+                            update_line(paragraph_num, line_content, is_final=False)
                             
                             # Submit next model
                             is_final_model = (model_idx + 1 == len(self.model_names) - 1)
@@ -831,17 +836,12 @@ Text: "{text}" """
                             self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, explanation)
                             result_status = f"● found (conf: 0.95)"
                             
-                            # Update display buffer
+                            # Update display with final result
                             decisions_str = " | ".join(state['decisions'])
-                            with display_lock:
-                                display_buffer[paragraph_num] = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
-                            update_display()
+                            line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}"
+                            update_line(paragraph_num, line_content, is_final=True)
                             
-                            # Remove from active display
                             completed_stanzas.add(paragraph_num)
-                            with display_lock:
-                                if paragraph_num in display_buffer:
-                                    del display_buffer[paragraph_num]
                             
                             # Save progress
                             progress = {
@@ -864,15 +864,11 @@ Text: "{text}" """
                         state = stanza_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
                         
-                        # Update display for error case
-                        with display_lock:
-                            display_buffer[paragraph_num] = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Error → ○ skip"
-                        update_display()
+                        # Update display with error
+                        line_content = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Error → ○ skip"
+                        update_line(paragraph_num, line_content, is_final=True)
                         
                         completed_stanzas.add(paragraph_num)
-                        with display_lock:
-                            if paragraph_num in display_buffer:
-                                del display_buffer[paragraph_num]
                         
                         # Start next paragraph from queue if available
                         if paragraph_queue and self.model_names:
