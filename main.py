@@ -702,15 +702,13 @@ Text: "{text}" """
 
     def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
         """Process all paragraphs continuously with up to 8 concurrent evaluations."""
-        import sys
         import threading
         from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
         
         # Thread-safe state management
         stanza_states: Dict[int, Dict[str, Any]] = {}
         completed_stanzas: set[int] = set()
-        active_lines: List[int] = []  # Ordered list of paragraph_nums currently displayed
-        active_lines_status: Dict[int, Tuple[str, bool]] = {}  # Maps paragraph_num to (content, is_completed)
+        active_lines: List[int] = []  # Track which paragraphs we've seen
         display_lock: threading.Lock = threading.Lock()
         
         # Initialize all paragraph states
@@ -722,40 +720,17 @@ Text: "{text}" """
             }
 
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Thread-safe line update - keep completed results visible."""
+            """Simple scrolling display - just print each significant update."""
             with display_lock:
-                if paragraph_num not in active_lines:
-                    # First time displaying this line
-                    active_lines.append(paragraph_num)
-                    active_lines_status[paragraph_num] = (line_content, is_final)
+                if is_final:
+                    # Always print final results
                     print(line_content)
-                else:
-                    # Update existing line
-                    active_lines_status[paragraph_num] = (line_content, is_final)
-                    
-                    # Find position from bottom
-                    idx = active_lines.index(paragraph_num)
-                    lines_from_bottom = len(active_lines) - idx - 1
-                    
-                    if lines_from_bottom > 0:
-                        # Move cursor up to target line
-                        sys.stdout.write(f"\033[{lines_from_bottom}A")
-                    
-                    # Clear line and write new content
-                    sys.stdout.write("\033[2K\r")  # Clear line and return to start
-                    sys.stdout.write(line_content)
-                    
-                    if lines_from_bottom > 0:
-                        # Move cursor back to bottom
-                        sys.stdout.write(f"\033[{lines_from_bottom}B")
-                    else:
-                        # If we're on the last line, add newline for next print
-                        sys.stdout.write("\n")
-                    
-                    sys.stdout.flush()
-                
-                # CRITICAL: DON'T remove completed lines - keep them visible!
-                # This was the core issue - completed results were disappearing
+                elif paragraph_num not in active_lines:
+                    # First time seeing this paragraph - print initial state
+                    active_lines.append(paragraph_num)
+                    print(line_content)
+                # For intermediate updates of existing lines, we'll skip printing
+                # This avoids all the ANSI complexity while still showing progress
         with ThreadPoolExecutor(max_workers=3) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
             paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)  # Copy for safe iteration
