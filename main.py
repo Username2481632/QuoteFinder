@@ -755,12 +755,18 @@ Text: "{text}" """
             active_futures = {}
             paragraph_queue = list(paragraph_list)  # Copy for safe iteration
             
+            def start_next_stanza_if_available():
+                """Start the next stanza from queue if available. Returns True if started."""
+                if paragraph_queue and self.model_names:
+                    next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                    next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                    active_futures[next_future] = (next_paragraph_num, 0)
+                    return True
+                return False
+            
             # Start initial batch of Model 1 evaluations (up to 8)
             for _ in range(min(8, len(paragraph_queue))):
-                if paragraph_queue and self.model_names:
-                    paragraph_num, paragraph = paragraph_queue.pop(0)
-                    future = executor.submit(self.classify_text, paragraph, self.model_names[0], need_explanation=False)
-                    active_futures[future] = (paragraph_num, 0)
+                start_next_stanza_if_available()
             
             # Process results as they complete and keep queue flowing
             while active_futures and not self.cancelled:
@@ -803,10 +809,7 @@ Text: "{text}" """
                             self.save_progress(progress)
                             
                             # ALWAYS start next paragraph when ANY stanza completes (rejected)
-                            if paragraph_queue and self.model_names:
-                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                                next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
-                                active_futures[next_future] = (next_paragraph_num, 0)
+                            start_next_stanza_if_available()
                             
                         elif model_idx + 1 < len(self.model_names):
                             # Continue to next model - show intermediate progress
@@ -825,10 +828,7 @@ Text: "{text}" """
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
                             # CRITICAL: Start new stanza when continuing to next model
-                            if paragraph_queue and self.model_names:
-                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                                new_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
-                                active_futures[new_future] = (next_paragraph_num, 0)
+                            start_next_stanza_if_available()
                             
                         else:
                             # All models approved - finalize
@@ -858,10 +858,7 @@ Text: "{text}" """
                             self.save_progress(progress)
                             
                             # ALWAYS start next paragraph when ANY stanza completes (approved)
-                            if paragraph_queue and self.model_names:
-                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                                next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
-                                active_futures[next_future] = (next_paragraph_num, 0)
+                            start_next_stanza_if_available()
                         
                     except Exception as e:
                         if self.verbose:
@@ -877,10 +874,7 @@ Text: "{text}" """
                         completed_stanzas.add(paragraph_num)
                         
                         # ALWAYS start next paragraph when ANY stanza completes (error)
-                        if paragraph_queue and self.model_names:
-                            next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                            next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
-                            active_futures[next_future] = (next_paragraph_num, 0)
+                        start_next_stanza_if_available()
 
 
 def verify_models_available(model_names: Union[str, List[str]]):
