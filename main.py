@@ -733,29 +733,32 @@ Text: "{text}" """
                 # Calculate total lines to clear (completed + "Active Processes:" header + 8 active lines)
                 total_lines = len(completed_stanzas) + 1 + 8
                 
-                # Move cursor up to start of display and clear everything
+                # Move cursor up to start of display
                 if total_lines > 0:
                     sys.stdout.write(f"\033[{total_lines}A")
                 
-                # Print all completed stanzas in order
+                # Print all completed stanzas in order (clear each line first)
                 for stanza_num in completed_stanzas:
+                    sys.stdout.write("\033[2K")  # Clear entire line
                     state = stanza_states[stanza_num]
                     decisions_str = " | ".join(state['decisions'])
                     response, confidence, explanation = state['final_result']
                     result_status = f"● found (conf: {confidence:.2f})" if response == self.positive_label else f"○ skip (conf: {confidence:.2f})"
-                    print(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}")
+                    sys.stdout.write(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
                 
-                # Print "Active Processes:" header
-                print("Active Processes:")
+                # Print "Active Processes:" header (clear line first)
+                sys.stdout.write("\033[2K")  # Clear entire line
+                sys.stdout.write("Active Processes:\n")
                 
-                # Print current active processes (up to 8)
+                # Print current active processes (up to 8, clear each line first)
                 active_list = list(active_processes.items())
                 for i in range(8):
+                    sys.stdout.write("\033[2K")  # Clear entire line
                     if i < len(active_list):
                         stanza_num, status = active_list[i]
-                        print(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {status}")
+                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {status}\n")
                     else:
-                        print("  [waiting...]")
+                        sys.stdout.write("  [waiting...]\n")
                 
                 sys.stdout.flush()
 
