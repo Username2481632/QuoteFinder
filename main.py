@@ -449,7 +449,6 @@ Text: "{text}" """
             for batch_start in range(0, len(remaining_paragraphs), batch_size):
                 # Check for cancellation
                 if self.cancelled:
-                    print("\n\nProcessing cancelled by user.")
                     break
                     
                 batch_end = min(batch_start + batch_size, len(remaining_paragraphs))
@@ -466,7 +465,6 @@ Text: "{text}" """
                     for paragraph_num, response, confidence, explanation in batch_results:
                         # Check for cancellation during results processing
                         if self.cancelled:
-                            print("\n\nProcessing cancelled by user.")
                             break
                             
                         total_processed += 1
@@ -512,6 +510,16 @@ Text: "{text}" """
         except Exception as e:
             print(f"Error processing text: {e}")
             raise
+        
+        # Check if processing was cancelled
+        if self.cancelled:
+            print(f"\n\nProcessing cancelled by user.")
+            print(f"Progress saved. Resume by running the script again.")
+            return {
+                "last_paragraph": total_processed + start_paragraph,
+                "total_processed": total_processed,
+                "total_found": total_found
+            }
         
         print(f"\nProcessing complete!")
         print(f"Total paragraphs processed: {total_processed}")
