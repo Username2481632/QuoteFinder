@@ -728,11 +728,11 @@ Text: "{text}" """
         
         # Initialize display
         print("Recent Completions:")
-        for i in range(MAX_COMPLETED_DISPLAY):
+        for _ in range(MAX_COMPLETED_DISPLAY):
             print("  [waiting...]")
         
-        print("\nActive Processes:")
-        for i in range(8):
+        print("Active Processes:")
+        for _ in range(8):
             print("  [waiting...]")
         
         def update_display() -> None:
@@ -744,7 +744,7 @@ Text: "{text}" """
                 # Move to start of display
                 sys.stdout.write(f"\033[{total_lines}A")
                 
-                # Update recent completions section
+                # Clear and update recent completions section
                 sys.stdout.write("\033[2K")  # Clear line
                 sys.stdout.write("Recent Completions:\n")
                 
@@ -756,20 +756,20 @@ Text: "{text}" """
                         decisions_str = " | ".join(state['decisions'])
                         response, confidence, _ = state['final_result']
                         result_status = f"● found (conf: {confidence:.2f})" if response == self.positive_label else f"○ skip (conf: {confidence:.2f})"
-                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
+                        sys.stdout.write(f"  Stanza {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
-                # Update active processes section
+                # Clear and update active processes section
                 sys.stdout.write("\033[2K")  # Clear line
-                sys.stdout.write("\nActive Processes:\n")
+                sys.stdout.write("Active Processes:\n")
                 
                 active_list = list(active_processes.items())
                 for i in range(8):
                     sys.stdout.write("\033[2K")  # Clear line
                     if i < len(active_list):
                         stanza_num, status = active_list[i]
-                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {stanza_num + 1}/{total_paragraphs}: {status}\n")
+                        sys.stdout.write(f"  Stanza {stanza_num + 1}/{total_paragraphs}: {status}\n")
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
