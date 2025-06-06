@@ -392,34 +392,37 @@ Text: "{text}" """
         
         return matches / total_samples
 
-    def classify_with_cascade(self, text: str) -> tuple[str, float, str]:
+    def classify_with_cascade(self, text: str) -> tuple[str, float, str, str]:
         """
         Classify text using cascade verification with multiple models.
         First model detects positives, subsequent models verify them.
         Returns final classification after all models agree.
+        Returns: (response, confidence, explanation, cascade_info)
         """
         if len(self.model_names) == 1:
             # Single model - use standard classification
-            return self.classify_text(text, self.model_names[0])
+            response, confidence, explanation = self.classify_text(text, self.model_names[0])
+            return response, confidence, explanation, f"Model 1: {response}"
         
         # Multi-model cascade verification
         explanation = ""
+        cascade_decisions = []
+        
         for i, model_name in enumerate(self.model_names):
             response, confidence, explanation = self.classify_text(text, model_name)
+            cascade_decisions.append(f"Model {i+1}: {response}")
             
             if response == self.negative_label:
                 # If any model in the cascade says negative, reject
-                if self.verbose:
-                    print(f"    Model {i+1}: {response} → rejected")
-                return self.negative_label, confidence, ""
-            elif self.verbose:
-                print(f"    Model {i+1}: {response}")
+                cascade_decisions[-1] += " → rejected"
+                cascade_info = " | ".join(cascade_decisions)
+                return self.negative_label, confidence, "", cascade_info
         
         # All models agreed it's positive - use final model's explanation
-        if self.verbose:
-            print(f"    → All {len(self.model_names)} models approved")
+        cascade_decisions.append(f"→ All {len(self.model_names)} approved")
+        cascade_info = " | ".join(cascade_decisions)
         
-        return self.positive_label, 0.95, explanation
+        return self.positive_label, 0.95, explanation, cascade_info
 
     def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, int]:
         """
@@ -513,7 +516,7 @@ Text: "{text}" """
                     batch_results = self._process_paragraph_batch(batch_data, batch_size)
                     
                     # Handle results
-                    for paragraph_num, response, confidence, explanation in batch_results:
+                    for paragraph_num, response, confidence, explanation, cascade_info in batch_results:
                         # Check for cancellation during results processing
                         if self.cancelled:
                             break
@@ -528,7 +531,7 @@ Text: "{text}" """
                             result_status = f"○ skip (conf: {confidence:.2f})"
                         
                         if self.verbose:
-                            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {result_status}")
+                            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {cascade_info} → {result_status}")
                         else:
                             # Update progress bar with total found count
                             self._update_progress(total_processed, total_paragraphs, total_found)
@@ -676,12 +679,12 @@ Text: "{text}" """
         def process_single_paragraph(paragraph_info):
             paragraph_num, paragraph = paragraph_info
             try:
-                response, confidence, explanation = self.classify_with_cascade(paragraph)
-                return (paragraph_num, response, confidence, explanation)
+                response, confidence, explanation, cascade_info = self.classify_with_cascade(paragraph)
+                return (paragraph_num, response, confidence, explanation, cascade_info)
             except Exception as e:
                 if self.verbose:
                     print(f"\nError processing paragraph {paragraph_num}: {e}")
-                return (paragraph_num, '0', 0.0, "")
+                return (paragraph_num, '0', 0.0, "", "Error")
         
         # Process in batches to avoid overwhelming the model
         for i in range(0, len(paragraph_data), batch_size):
@@ -702,7 +705,7 @@ Text: "{text}" """
                         results.append(result)
                         
                         # Update progress immediately for signal handler access
-                        paragraph_num, response, confidence, explanation = result
+                        paragraph_num, response, confidence, explanation, cascade_info = result
                         self.current_paragraph = paragraph_num
                         self.current_total_processed += 1
                         if response == '1':
@@ -712,7 +715,7 @@ Text: "{text}" """
                         paragraph_num = paragraph_info[0]
                         if self.verbose:
                             print(f"\nError in batch processing for paragraph {paragraph_num}: {e}")
-                        results.append((paragraph_num, '0', 0.0, ""))
+                        results.append((paragraph_num, '0', 0.0, "", "Error"))
                         
                         # Update progress even for errors
                         self.current_paragraph = paragraph_num
