@@ -523,37 +523,12 @@ Text: "{text}" """
                     print(f"\nBatch {batch_num}/{total_batches}")
                 
                 try:
-                    # Process batch in parallel
-                    batch_results = self._process_paragraph_batch(batch_data, batch_size)
+                    # Process batch in parallel with real-time updates
+                    self._process_paragraph_batch_realtime(batch_data, paragraphs, content_type, total_paragraphs, total_processed, total_found)
                     
-                    # Handle results
-                    for paragraph_num, response, confidence, explanation, cascade_info in batch_results:
-                        # Check for cancellation during results processing
-                        if self.cancelled:
-                            break
-                            
-                        total_processed += 1
-                        
-                        if response == '1':
-                            total_found += 1
-                            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
-                            result_status = f"● found (conf: {confidence:.2f})"
-                        else:
-                            result_status = f"○ skip (conf: {confidence:.2f})"
-                        
-                        if self.verbose:
-                            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {cascade_info} → {result_status}")
-                        else:
-                            # Update progress bar with total found count
-                            self._update_progress(total_processed, total_paragraphs, total_found)
-                        
-                        # Save progress after each paragraph
-                        progress = {
-                            "last_paragraph": paragraph_num,
-                            "total_processed": total_processed,
-                            "total_found": total_found
-                        }
-                        self.save_progress(progress)
+                    # Update totals based on what was actually processed
+                    total_processed = self.current_total_processed
+                    total_found = self.current_total_found
                     
                     # Check if cancelled after processing batch results
                     if self.cancelled:
@@ -735,6 +710,70 @@ Text: "{text}" """
         # Sort results by paragraph number to maintain order
         results.sort(key=lambda x: x[0])
         return results
+
+    def _process_paragraph_batch_realtime(self, batch_data, paragraphs, content_type, total_paragraphs, total_processed_start, total_found_start):
+        """Process paragraph batch with real-time result display."""
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            def process_single_paragraph(paragraph_info):
+                paragraph_num, paragraph = paragraph_info
+                try:
+                    response, confidence, explanation, cascade_info = self.classify_with_cascade(paragraph)
+                    return (paragraph_num, response, confidence, explanation, cascade_info)
+                except Exception as e:
+                    if self.verbose:
+                        print(f"\nError processing paragraph {paragraph_num}: {e}")
+                    return (paragraph_num, '0', 0.0, "", "Error")
+
+            # Submit all tasks
+            future_to_paragraph = {
+                executor.submit(process_single_paragraph, para_info): para_info
+                for para_info in batch_data
+            }
+            
+            # Process results as they complete (real-time display)
+            for future in as_completed(future_to_paragraph):
+                if self.cancelled:
+                    break
+                    
+                paragraph_info = future_to_paragraph[future]
+                try:
+                    result = future.result()
+                    paragraph_num, response, confidence, explanation, cascade_info = result
+                    
+                    # Update progress immediately
+                    self.current_paragraph = paragraph_num
+                    self.current_total_processed += 1
+                    
+                    if response == '1':
+                        self.current_total_found += 1
+                        self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
+                        result_status = f"● found (conf: {confidence:.2f})"
+                    else:
+                        result_status = f"○ skip (conf: {confidence:.2f})"
+                    
+                    # Display result immediately
+                    if self.verbose:
+                        print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {cascade_info} → {result_status}")
+                    else:
+                        # Update progress bar with total found count
+                        self._update_progress(self.current_total_processed, total_paragraphs, self.current_total_found)
+                    
+                    # Save progress after each paragraph
+                    progress = {
+                        "last_paragraph": paragraph_num,
+                        "total_processed": self.current_total_processed,
+                        "total_found": self.current_total_found
+                    }
+                    self.save_progress(progress)
+                    
+                except Exception as e:
+                    paragraph_num = paragraph_info[0]
+                    if self.verbose:
+                        print(f"\nError in batch processing for paragraph {paragraph_num}: {e}")
+                    
+                    # Update progress even for errors
+                    self.current_paragraph = paragraph_num
+                    self.current_total_processed += 1
 
 def verify_models_available(model_names: Union[str, List[str]]):
     """Verify that the specified model(s) are available in Ollama."""
