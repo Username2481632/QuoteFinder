@@ -738,8 +738,8 @@ Text: "{text}" """
         def update_display() -> None:
             """Update the scrolling display: recent completions + active processes."""
             with display_lock:
-                # Calculate lines to move up (8 completed + 1 separator + 8 active = 17 lines)
-                total_lines = MAX_COMPLETED_DISPLAY + 1 + 8
+                # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) = 18 lines
+                total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8
                 
                 # Move to start of display
                 sys.stdout.write(f"\033[{total_lines}A")
