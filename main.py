@@ -824,6 +824,12 @@ Text: "{text}" """
                             )
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
+                            # CRITICAL: Start new stanza when continuing to next model
+                            if paragraph_queue and self.model_names:
+                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                                new_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                                active_futures[new_future] = (next_paragraph_num, 0)
+                            
                         else:
                             # All models approved - finalize
                             state['decisions'].append(f"→ All {len(self.model_names)} approved")
