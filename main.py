@@ -721,39 +721,43 @@ Text: "{text}" """
             }
 
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Thread-safe line update with cursor positioning."""
+            """Thread-safe line update with complete redraw approach."""
             with display_lock:
                 if paragraph_num not in active_lines:
-                    # First time displaying this line - add to end and print
+                    # First time - just add and print normally
                     active_lines.append(paragraph_num)
                     active_lines_status[paragraph_num] = (line_content, is_final)
                     print(line_content)
                 else:
-                    # Update existing line - find its position from the bottom
-                    idx = active_lines.index(paragraph_num)
-                    lines_from_bottom = len(active_lines) - idx - 1
-                    
-                    if lines_from_bottom > 0:
-                        # Move cursor up to the target line
-                        sys.stdout.write(f"\033[{lines_from_bottom}A")
-                    
-                    # Move to beginning of line and clear it
-                    sys.stdout.write("\033[G\033[2K")
-                    # Write new content
-                    sys.stdout.write(line_content)
-                    
-                    if lines_from_bottom > 0:
-                        # Move cursor back down to bottom
-                        sys.stdout.write(f"\033[{lines_from_bottom}B")
-                    
-                    # Ensure we end with a newline for the next print
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                    
-                    # Update status
+                    # Update existing line - use complete redraw approach
                     active_lines_status[paragraph_num] = (line_content, is_final)
+                    
+                    # Clear all active lines from display
+                    num_lines = len(active_lines)
+                    if num_lines > 1:
+                        # Move up to first line and clear all
+                        sys.stdout.write(f"\033[{num_lines-1}A")
+                        for _ in range(num_lines):
+                            sys.stdout.write("\033[2K\033[B")  # Clear line and move down
+                        # Move back up to start
+                        sys.stdout.write(f"\033[{num_lines}A")
+                    else:
+                        # Single line - just clear current line
+                        sys.stdout.write("\033[G\033[2K")
+                    
+                    # Redraw all lines in order
+                    for i, para_num in enumerate(active_lines):
+                        content, _ = active_lines_status[para_num]
+                        if i == len(active_lines) - 1:
+                            # Last line - print normally
+                            print(content)
+                        else:
+                            # Not last line - write without extra newline and move down
+                            sys.stdout.write(content + "\n")
+                    
+                    sys.stdout.flush()
                 
-                # Clean up completed stanzas from the front only
+                # Clean up completed stanzas from the front
                 while active_lines and active_lines_status[active_lines[0]][1]:
                     completed_paragraph = active_lines.pop(0)
                     del active_lines_status[completed_paragraph]
