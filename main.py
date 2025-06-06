@@ -732,18 +732,19 @@ Text: "{text}" """
         """Process batch with live cascade visualization - each model call is separate."""
         import sys
         
-        # Track state for each stanza
+        # Track state for each stanza and current display line
         stanza_states = {}
         completed_stanzas = set()
+        last_displayed_stanza = None
         
-        # Initialize display state - just track states, don't pre-print lines
+        # Initialize display state
         for i, (paragraph_num, paragraph) in enumerate(batch_data):
             stanza_states[paragraph_num] = {
                 'paragraph': paragraph,
                 'model_idx': 0,
                 'decisions': [],
                 'final_result': None,
-                'displayed': False
+                'has_printed_line': False
             }
         
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -777,9 +778,17 @@ Text: "{text}" """
                             completed_stanzas.add(paragraph_num)
                             
                         elif model_idx + 1 < len(self.model_names):
-                            # Continue to next model - just show current progress
+                            # Continue to next model - show progress with overwriting
                             decisions_str = " | ".join(state['decisions'])
-                            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}")
+                            line_text = f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}"
+                            
+                            if state['has_printed_line']:
+                                # Overwrite the existing line for this stanza
+                                print(f"\r{line_text}", end='', flush=True)
+                            else:
+                                # First time showing this stanza
+                                print(line_text)
+                                state['has_printed_line'] = True
                             
                             # Submit next model
                             is_final_model = (model_idx + 1 == len(self.model_names) - 1)
@@ -796,6 +805,11 @@ Text: "{text}" """
                             # All models approved - finalize
                             state['decisions'].append(f"→ All {len(self.model_names)} approved")
                             state['final_result'] = (response, 0.95, explanation)
+                            
+                            # If we had been showing intermediate progress, clear the line first
+                            if state['has_printed_line']:
+                                print()  # Move to new line before final result
+                            
                             self._display_final_result(state, paragraph_num, total_paragraphs, content_type, paragraphs)
                             completed_stanzas.add(paragraph_num)
                         
@@ -804,6 +818,11 @@ Text: "{text}" """
                             print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
                         state = stanza_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
+                        
+                        # If we had been showing intermediate progress, clear the line first
+                        if state['has_printed_line']:
+                            print()  # Move to new line before final result
+                            
                         self._display_final_result(state, paragraph_num, total_paragraphs, content_type, paragraphs)
                         completed_stanzas.add(paragraph_num)
                     
@@ -825,7 +844,7 @@ Text: "{text}" """
         else:
             result_status = f"○ skip (conf: {confidence:.2f})"
         
-        # Final display
+        # Final display - always on a clean new line
         decisions_str = " | ".join(state['decisions'])
         print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}")
         
