@@ -49,6 +49,9 @@ class TextClassifier:
         self.prompt_template = self.config['search_criteria']
         self.search_criteria = self.config['search_criteria']
         
+        # Progress tracking
+        self.start_time = None
+        
         # Create main output directory
         self.base_output_dir = Path("output")
         self.base_output_dir.mkdir(exist_ok=True)
@@ -434,6 +437,10 @@ Text: "{text}" """
             else:
                 print(f"Processing {total_paragraphs} {content_type}...")
             
+            # Start timing for ETA calculation
+            import time
+            self.start_time = time.time()
+            
             # Process in batches
             for batch_start in range(0, len(remaining_paragraphs), batch_size):
                 batch_end = min(batch_start + batch_size, len(remaining_paragraphs))
@@ -518,10 +525,26 @@ Text: "{text}" """
             filled_length = int(bar_length * progress)
             bar = '█' * filled_length + '░' * (bar_length - filled_length)
             
-            # Calculate ETA or speed if we have enough data
+            # Calculate ETA if we have timing data
             status = f"[{current:4d}/{total}] {bar} {progress:.1%}"
+            
             if total_found > 0:
                 status += f" | Found: {total_found}"
+            
+            # Add ETA if we have enough data
+            if self.start_time and current > 0:
+                import time
+                elapsed = time.time() - self.start_time
+                avg_time_per_item = elapsed / current
+                remaining_items = total - current
+                eta_seconds = remaining_items * avg_time_per_item
+                
+                if eta_seconds > 60:
+                    eta_minutes = int(eta_seconds / 60)
+                    eta_seconds = int(eta_seconds % 60)
+                    status += f" | ETA: {eta_minutes}m{eta_seconds:02d}s"
+                else:
+                    status += f" | ETA: {int(eta_seconds)}s"
             
             # Use \r to overwrite the current line
             print(f"\r{status}", end="", flush=True)
