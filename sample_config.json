@@ -1,5 +1,5 @@
 {
-  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"],
+  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b", "qwen3:14b"],
   "target_file": "huckleberry_finn.html",
   "search_criteria": "explicit description of a character comparing themselves to another person"
 }
