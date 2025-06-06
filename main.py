@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Quote Finder - Extract social comparison paragraphs from text using a local LLM
+Quote Finder - Extract matching paragraphs from text using a local LLM
 
 This script processes HTML/text files paragraph by paragraph, sends each paragraph
-to a local language model via Ollama, and logs paragraphs that show people
-comparing themselves to others.
+to a local language model via Ollama, and logs paragraphs that match
+specified criteria.
 
 Requirements:
 - Ollama installed and running
@@ -116,7 +116,7 @@ class TextClassifier:
         # Create detailed results file header only if not in simple mode
         if not self.simple and not self.detailed_results_file.exists():
             with open(self.detailed_results_file, 'w', encoding='utf-8') as f:
-                f.write("Social Comparison Paragraphs Found\n")
+                f.write("Matching Paragraphs Found\n")
                 f.write("=" * 50 + "\n\n")
     
     def append_result(self, paragraph_num: int, text: str, confidence: float, explanation: str = ""):
@@ -142,9 +142,9 @@ class TextClassifier:
         # Only print detailed info in verbose mode
         if self.verbose:
             if self.simple:
-                print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f})")
+                print(f"✓ MATCH FOUND (confidence: {confidence:.2f})")
             else:
-                print(f"✓ SOCIAL COMPARISON FOUND (confidence: {confidence:.2f}) - {explanation}")
+                print(f"✓ MATCH FOUND (confidence: {confidence:.2f}) - {explanation}")
         # In non-verbose mode, the progress bar will handle the display
 
     def _extract_text_from_html(self, html_path: str) -> str:
@@ -241,7 +241,7 @@ class TextClassifier:
 {self.search_criteria}
 ```
 Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.
-If you answer "1", provide a brief 1-sentence explanation of what comparison you found.
+If you answer "1", provide a brief 1-sentence explanation of what you found.
 If you answer "0", just respond with "0".
 
 Format: Either "0" or "1: [explanation]"
@@ -301,11 +301,11 @@ Text: "{text}" """
                 explanation = final_answer[2:].strip()
                 return self.positive_label, 0.95, explanation
             elif final_answer == self.positive_label:
-                return self.positive_label, 0.95, "Social comparison detected."
+                return self.positive_label, 0.95, "Match detected."
             elif final_answer == self.negative_label:
                 return self.negative_label, 0.95, ""
             elif self.positive_label in final_answer and self.negative_label not in final_answer:
-                return self.positive_label, 0.85, "Social comparison detected."
+                return self.positive_label, 0.85, "Match detected."
             elif self.negative_label in final_answer and self.positive_label not in final_answer:
                 return self.negative_label, 0.85, ""
             
@@ -337,7 +337,7 @@ Text: "{text}" """
         norm_prob_negative = prob_negative / total_prob
         
         if norm_prob_positive > norm_prob_negative:
-            return self.positive_label, norm_prob_positive, "Social comparison detected."
+            return self.positive_label, norm_prob_positive, "Match detected."
         else:
             return self.negative_label, norm_prob_negative, ""
     
@@ -403,7 +403,7 @@ Text: "{text}" """
         if start_paragraph > 0:
             print(f"Resuming from paragraph {start_paragraph + 1}")
             if total_found > 0:
-                print(f"Previously found {total_found} social comparisons")
+                print(f"Previously found {total_found} matches")
         else:
             print(f"Analyzing from beginning")
 
@@ -499,7 +499,7 @@ Text: "{text}" """
         
         print(f"\nProcessing complete!")
         print(f"Total paragraphs processed: {total_processed}")
-        print(f"Social comparisons found: {total_found}")
+        print(f"Matches found: {total_found}")
         if total_processed > 0:
             print(f"Success rate: {total_found/total_processed*100:.1f}%")
         
@@ -509,7 +509,7 @@ Text: "{text}" """
             f.write("PROCESSING COMPLETE\n")
             f.write("=" * 50 + "\n")
             f.write(f"Total paragraphs processed: {total_processed}\n")
-            f.write(f"Social comparisons found: {total_found}\n")
+            f.write(f"Matches found: {total_found}\n")
             if total_processed > 0:
                 f.write(f"Success rate: {total_found/total_processed*100:.1f}%\n")
         
@@ -705,7 +705,7 @@ def start_ollama(verbose: bool = False) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract social comparison paragraphs from text using a local LLM")
+    parser = argparse.ArgumentParser(description="Extract matching paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
     parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
     parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")

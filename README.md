@@ -1,6 +1,6 @@
-# Social Comparison Finder
+# Quote Finder
 
-Extract paragraphs containing social comparisons from text using a local language model. Supports both HTML files (like Huckleberry Finn) and TXT files (like The Odyssey).
+Extract paragraphs containing specific content from text using a local language model. Supports both HTML files (like Huckleberry Finn) and TXT files (like The Odyssey).
 
 ## Setup
 
