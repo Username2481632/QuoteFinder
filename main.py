@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import signal
 import subprocess
@@ -867,10 +868,17 @@ def main():
 classifier_instance = None
 
 def signal_handler(signum, frame):
-    """Handle Ctrl+C by exiting immediately."""
+    """Handle Ctrl+C by terminating immediately and forcefully."""
     print("\n\nReceived cancellation signal (Ctrl+C). Stopping immediately...")
     print("Cancelled.")
-    sys.exit(1)
+    
+    # Flush output buffers to ensure messages are shown
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    # Force immediate termination - bypasses cleanup and Python exit handlers
+    # This will terminate all threads and the entire process immediately
+    os._exit(1)
 
 
 if __name__ == "__main__":
