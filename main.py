@@ -500,14 +500,13 @@ Text: "{text}" """
             
             total_paragraphs = len(paragraphs)
             
-            # Prepare paragraph data for batch processing
+            # Prepare paragraph data for continuous processing
             remaining_paragraphs = [(i, paragraph) for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph)]
-            batch_size = 4  # Process 4 paragraphs in parallel
             
             if self.verbose:
                 print(f"Total {content_type} to process: {total_paragraphs}")
                 print(f"Starting from {content_type[:-1]}: {start_paragraph + 1}")
-                print(f"Using batch processing with {batch_size} parallel workers")
+                print(f"Using continuous processing with up to 8 parallel workers")
             else:
                 print(f"Processing {total_paragraphs} {content_type}...")
             
@@ -516,40 +515,22 @@ Text: "{text}" """
             self.start_time = time.time()
             self.session_start_processed = total_processed  # Track work done before this session
             
-            # Process in batches
-            for batch_start in range(0, len(remaining_paragraphs), batch_size):
-                # Check for cancellation
-                if self.cancelled:
-                    break
-                    
-                batch_end = min(batch_start + batch_size, len(remaining_paragraphs))
-                batch_data = remaining_paragraphs[batch_start:batch_end]
+            try:
+                # Process all paragraphs continuously
+                self._process_paragraphs_continuously(remaining_paragraphs, paragraphs, content_type, total_paragraphs)
                 
-                if self.verbose:
-                    batch_num = batch_start//batch_size + 1
-                    total_batches = (len(remaining_paragraphs) + batch_size - 1)//batch_size
-                    print(f"\nBatch {batch_num}/{total_batches}")
-                
-                try:
-                    # Process batch with real-time cascade visualization
-                    self._process_batch_with_live_cascade(batch_data, paragraphs, content_type, total_paragraphs)
+                # Update totals based on what was actually processed
+                total_processed = self.current_total_processed
+                total_found = self.current_total_found
                     
-                    # Update totals based on what was actually processed
-                    total_processed = self.current_total_processed
-                    total_found = self.current_total_found
-                    
-                    # Check if cancelled after processing batch results
-                    if self.cancelled:
-                        break
-                        
-                except KeyboardInterrupt:
-                    print(f"\n\nProcessing interrupted by user.")
-                    print(f"Progress saved. Resume by running the script again.")
-                    return {
-                        "last_paragraph": total_processed + start_paragraph,
-                        "total_processed": total_processed,
-                        "total_found": total_found
-                    }
+            except KeyboardInterrupt:
+                print(f"\n\nProcessing interrupted by user.")
+                print(f"Progress saved. Resume by running the script again.")
+                return {
+                    "last_paragraph": self.current_total_processed + start_paragraph,
+                    "total_processed": self.current_total_processed,
+                    "total_found": self.current_total_found
+                }
                 
         except KeyboardInterrupt:
             print(f"\n\nProcessing interrupted by user.")
@@ -719,61 +700,146 @@ Text: "{text}" """
         results.sort(key=lambda x: x[0])
         return results
 
-    def _process_batch_with_live_cascade(self, batch_data, paragraphs, content_type, total_paragraphs):
-        """Process batch with live cascade visualization - each model call is separate."""
+    def _process_paragraphs_continuously(self, paragraph_list, paragraphs, content_type, total_paragraphs):
+        """Process all paragraphs continuously with up to 8 concurrent evaluations."""
         import sys
         
         # Track state for each stanza
         stanza_states = {}
         completed_stanzas = set()
-        batch_size = len(batch_data)
         
-        # Remove undefined batch header
-        # print(f"Batch {self.current_batch}/{self.total_batches}")
-
-        # Print placeholders
-        for paragraph_num, paragraph in batch_data:
-            stanza_states[paragraph_num] = {'paragraph': paragraph, 'decisions': [], 'final_result': None}
-            print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: Processing...")
+        # Initialize all paragraph states
+        for paragraph_num, paragraph in paragraph_list:
+            stanza_states[paragraph_num] = {
+                'paragraph': paragraph,
+                'decisions': [],
+                'final_result': None,
+                'displayed': False
+            }
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures = {}
-            for paragraph_num, paragraph in batch_data:
-                if self.model_names:
-                    f = executor.submit(self.classify_text, paragraph, self.model_names[0], need_explanation=False)
-                    active_futures[f] = (paragraph_num, 0)
-
-            # Real-time updates using wait
+            paragraph_queue = list(paragraph_list)  # Copy for safe iteration
+            
+            # Start initial batch of Model 1 evaluations (up to 8)
+            for _ in range(min(8, len(paragraph_queue))):
+                if paragraph_queue and self.model_names:
+                    paragraph_num, paragraph = paragraph_queue.pop(0)
+                    future = executor.submit(self.classify_text, paragraph, self.model_names[0], need_explanation=False)
+                    active_futures[future] = (paragraph_num, 0)
+            
+            # Process results as they complete and keep queue flowing
             while active_futures and not self.cancelled:
                 done, _ = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
-                for f in done:
-                    paragraph_num, model_idx = active_futures.pop(f)
+                
+                for future in done:
+                    paragraph_num, model_idx = active_futures.pop(future)
+                    
                     if paragraph_num in completed_stanzas:
                         continue
-                    response, confidence, explanation = f.result()
-                    state = stanza_states[paragraph_num]
-                    state['decisions'].append(f"Model {model_idx+1}: {response}")
-                    decisions_str = " | ".join(state['decisions'])
-                    i = next(idx for idx,(pn,_) in enumerate(batch_data) if pn==paragraph_num)
-                    up = batch_size - i
-                    down = up - 1
-                    # Move up and clear
-                    sys.stdout.write(f"\033[{up}A")
-                    sys.stdout.write("\033[2K")
-                    # Write updated line
-                    if response == self.negative_label or model_idx+1 == len(self.model_names):
-                        res_status = f"● found (conf: {confidence:.2f})" if response=='1' else f"○ skip (conf: {confidence:.2f})"
-                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {res_status}\n")
+                    
+                    try:
+                        response, confidence, explanation = future.result()
+                        state = stanza_states[paragraph_num]
+                        state['decisions'].append(f"Model {model_idx + 1}: {response}")
+                        
+                        if response == self.negative_label:
+                            # Rejected - finalize this stanza
+                            state['decisions'][-1] += " → rejected"
+                            state['final_result'] = (response, confidence, "")
+                            self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
+                            completed_stanzas.add(paragraph_num)
+                            
+                            # Start next paragraph from queue if available
+                            if paragraph_queue and self.model_names:
+                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                                next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                                active_futures[next_future] = (next_paragraph_num, 0)
+                            
+                        elif model_idx + 1 < len(self.model_names):
+                            # Continue to next model
+                            decisions_str = " | ".join(state['decisions'])
+                            if not state['displayed']:
+                                print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}")
+                                state['displayed'] = True
+                            else:
+                                # Update existing line
+                                print(f"\r  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}", end='', flush=True)
+                            
+                            # Submit next model
+                            is_final_model = (model_idx + 1 == len(self.model_names) - 1)
+                            next_future = executor.submit(
+                                self.classify_text, 
+                                state['paragraph'], 
+                                self.model_names[model_idx + 1], 
+                                need_explanation=is_final_model
+                            )
+                            active_futures[next_future] = (paragraph_num, model_idx + 1)
+                            
+                        else:
+                            # All models approved - finalize
+                            state['decisions'].append(f"→ All {len(self.model_names)} approved")
+                            state['final_result'] = (response, 0.95, explanation)
+                            
+                            # Clear current line if we were updating it
+                            if state['displayed']:
+                                print()  # Move to new line
+                                
+                            self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
+                            completed_stanzas.add(paragraph_num)
+                            
+                            # Start next paragraph from queue if available
+                            if paragraph_queue and self.model_names:
+                                next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                                next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                                active_futures[next_future] = (next_paragraph_num, 0)
+                        
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
+                        
+                        state = stanza_states[paragraph_num]
+                        state['final_result'] = ('0', 0.0, "")
+                        
+                        # Clear current line if we were updating it
+                        if state['displayed']:
+                            print()  # Move to new line
+                            
+                        self._display_final_result_continuous(state, paragraph_num, total_paragraphs, content_type, paragraphs)
                         completed_stanzas.add(paragraph_num)
-                    else:
-                        sys.stdout.write(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str}\n")
-                        # Submit next
-                        next_model = self.model_names[model_idx+1]
-                        f2 = executor.submit(self.classify_text, state['paragraph'], next_model, need_explanation=(model_idx+1==len(self.model_names)-1))
-                        active_futures[f2] = (paragraph_num, model_idx+1)
-                    # Move down
-                    sys.stdout.write(f"\033[{down}B")
-                    sys.stdout.flush()
+                        
+                        # Start next paragraph from queue if available
+                        if paragraph_queue and self.model_names:
+                            next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
+                            next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                            active_futures[next_future] = (next_paragraph_num, 0)
+    
+    def _display_final_result_continuous(self, state, paragraph_num, total_paragraphs, content_type, paragraphs):
+        """Display the final result for a stanza in continuous processing."""
+        response, confidence, explanation = state['final_result']
+        
+        # Update progress tracking
+        self.current_paragraph = paragraph_num
+        self.current_total_processed += 1
+        
+        if response == '1':
+            self.current_total_found += 1
+            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
+            result_status = f"● found (conf: {confidence:.2f})"
+        else:
+            result_status = f"○ skip (conf: {confidence:.2f})"
+        
+        # Final display
+        decisions_str = " | ".join(state['decisions'])
+        print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {decisions_str} → {result_status}")
+        
+        # Save progress
+        progress = {
+            "last_paragraph": paragraph_num,
+            "total_processed": self.current_total_processed,
+            "total_found": self.current_total_found
+        }
+        self.save_progress(progress)
 
 
 def verify_models_available(model_names: Union[str, List[str]]):
