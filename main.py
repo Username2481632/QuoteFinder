@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -52,6 +53,7 @@ class TextClassifier:
         # Progress tracking
         self.start_time = None
         self.session_start_processed = 0  # How many were processed when this session started
+        self.cancelled = False  # Flag for cancellation
         
         # Create main output directory
         self.base_output_dir = Path("output")
@@ -445,6 +447,11 @@ Text: "{text}" """
             
             # Process in batches
             for batch_start in range(0, len(remaining_paragraphs), batch_size):
+                # Check for cancellation
+                if self.cancelled:
+                    print("\n\nProcessing cancelled by user.")
+                    break
+                    
                 batch_end = min(batch_start + batch_size, len(remaining_paragraphs))
                 batch_data = remaining_paragraphs[batch_start:batch_end]
                 
@@ -457,6 +464,11 @@ Text: "{text}" """
                     
                     # Handle results
                     for paragraph_num, response, confidence, explanation in batch_results:
+                        # Check for cancellation during results processing
+                        if self.cancelled:
+                            print("\n\nProcessing cancelled by user.")
+                            break
+                            
                         total_processed += 1
                         
                         if response == '1':
@@ -479,6 +491,10 @@ Text: "{text}" """
                             "total_found": total_found
                         }
                         self.save_progress(progress)
+                    
+                    # Check if cancelled after processing batch results
+                    if self.cancelled:
+                        break
                         
                 except KeyboardInterrupt:
                     print(f"\n\nProcessing interrupted by user.")
@@ -737,6 +753,11 @@ def main():
     # Check if model is available
     verify_model_available(classifier.model_name)
     
+    # Set up signal handler for graceful cancellation
+    global classifier_instance
+    classifier_instance = classifier
+    signal.signal(signal.SIGINT, signal_handler)
+    
     # Test the model connection
     if args.verbose:
         print("Testing Ollama connection...")
@@ -764,6 +785,20 @@ def main():
         print(f"- Detailed results: {classifier.detailed_results_file}")
     if args.verbose:
         print(f"Progress file: {classifier.progress_file}")
+
+
+# Global variable to hold classifier instance for signal handler
+classifier_instance = None
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully by setting cancellation flag."""
+    global classifier_instance
+    if classifier_instance:
+        print("\n\nReceived cancellation signal (Ctrl+C). Stopping after current batch...")
+        classifier_instance.cancelled = True
+    else:
+        print("\n\nCancelled.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
