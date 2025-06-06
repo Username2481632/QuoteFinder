@@ -845,7 +845,7 @@ def main():
         print("Testing Ollama connection...")
     try:
         ollama.chat(
-            model=classifier.model_name, 
+            model=classifier.model_names[0], 
             messages=[{'role': 'user', 'content': 'test'}], 
             options={'num_predict': 1}
         )
