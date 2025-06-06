@@ -409,8 +409,7 @@ Text: "{text}" """
             return self.classify_text(text, self.model_names[0])
         
         # Multi-model cascade verification
-        explanations = []
-        
+        explanation = ""
         for i, model_name in enumerate(self.model_names):
             response, confidence, explanation = self.classify_text(text, model_name)
             
@@ -422,17 +421,12 @@ Text: "{text}" """
                 if self.verbose:
                     print(f"    Cascade rejected by model {i+1}")
                 return self.negative_label, confidence, ""
-            
-            # Model said positive, collect explanation and continue
-            if explanation:
-                explanations.append(f"Model {i+1}: {explanation}")
         
-        # All models agreed it's positive
-        combined_explanation = " | ".join(explanations) if explanations else "Match detected by cascade verification."
+        # All models agreed it's positive - use final model's explanation
         if self.verbose:
             print(f"    Cascade approved by all {len(self.model_names)} models")
         
-        return self.positive_label, 0.95, combined_explanation
+        return self.positive_label, 0.95, explanation
 
     def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, int]:
         """
