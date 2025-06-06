@@ -401,17 +401,25 @@ Text: "{text}" """
         
         return matches / total_samples
 
-    def classify_with_cascade(self, text: str) -> tuple[str, float, str, str]:
+    def classify_with_cascade(self, text: str, progress_callback=None, stanza_info="") -> tuple[str, float, str, str]:
         """
         Classify text using cascade verification with multiple models.
         First model detects positives, subsequent models verify them.
         Returns final classification after all models agree.
         Returns: (response, confidence, explanation, cascade_info)
+        
+        Args:
+            text: Text to classify
+            progress_callback: Optional callback for real-time progress updates
+            stanza_info: Info string for progress display (e.g., "Stanza 75/634")
         """
         if len(self.model_names) == 1:
             # Single model - use standard classification
             response, confidence, explanation = self.classify_text(text, self.model_names[0])
-            return response, confidence, explanation, f"Model 1: {response}"
+            cascade_info = f"Model 1: {response}"
+            if progress_callback:
+                progress_callback(stanza_info, cascade_info, response == '1')
+            return response, confidence, explanation, cascade_info
         
         # Multi-model cascade verification
         explanation = ""
@@ -423,15 +431,24 @@ Text: "{text}" """
             response, confidence, explanation = self.classify_text(text, model_name, need_explanation=is_final_model)
             cascade_decisions.append(f"Model {i+1}: {response}")
             
+            # Send progress update after each model
+            current_cascade = " | ".join(cascade_decisions)
+            if progress_callback:
+                progress_callback(stanza_info, current_cascade, None)  # None = still in progress
+            
             if response == self.negative_label:
                 # If any model in the cascade says negative, reject
                 cascade_decisions[-1] += " → rejected"
                 cascade_info = " | ".join(cascade_decisions)
+                if progress_callback:
+                    progress_callback(stanza_info, cascade_info, False, final=True)
                 return self.negative_label, confidence, "", cascade_info
         
         # All models agreed it's positive - use final model's explanation
         cascade_decisions.append(f"→ All {len(self.model_names)} approved")
         cascade_info = " | ".join(cascade_decisions)
+        if progress_callback:
+            progress_callback(stanza_info, cascade_info, True, final=True)
         
         return self.positive_label, 0.95, explanation, cascade_info
 
@@ -713,11 +730,36 @@ Text: "{text}" """
 
     def _process_paragraph_batch_realtime(self, batch_data, paragraphs, content_type, total_paragraphs, total_processed_start, total_found_start):
         """Process paragraph batch with real-time result display."""
+        
+        # Track active lines for overwriting
+        active_lines = {}  # paragraph_num -> line content
+        
+        def progress_callback(stanza_info, cascade_info, is_match, final=False):
+            """Callback for real-time progress updates with line overwriting."""
+            if not self.verbose:
+                return  # Only do real-time updates in verbose mode
+                
+            if final:
+                # Final result - add outcome and newline
+                if is_match:
+                    result_status = "● found (conf: 0.95)"
+                else:
+                    result_status = "○ skip (conf: 0.95)"
+                line = f"  {stanza_info}: {cascade_info} → {result_status}"
+                print(f"\r{line}")  # Overwrite and commit with newline
+            else:
+                # In-progress update - overwrite without newline
+                line = f"  {stanza_info}: {cascade_info}..."
+                print(f"\r{line}", end='', flush=True)
+        
         with ThreadPoolExecutor(max_workers=4) as executor:
             def process_single_paragraph(paragraph_info):
                 paragraph_num, paragraph = paragraph_info
                 try:
-                    response, confidence, explanation, cascade_info = self.classify_with_cascade(paragraph)
+                    stanza_info = f"{content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}"
+                    response, confidence, explanation, cascade_info = self.classify_with_cascade(
+                        paragraph, progress_callback, stanza_info
+                    )
                     return (paragraph_num, response, confidence, explanation, cascade_info)
                 except Exception as e:
                     if self.verbose:
@@ -730,7 +772,7 @@ Text: "{text}" """
                 for para_info in batch_data
             }
             
-            # Process results as they complete (real-time display)
+            # Process results as they complete
             for future in as_completed(future_to_paragraph):
                 if self.cancelled:
                     break
@@ -747,16 +789,6 @@ Text: "{text}" """
                     if response == '1':
                         self.current_total_found += 1
                         self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
-                        result_status = f"● found (conf: {confidence:.2f})"
-                    else:
-                        result_status = f"○ skip (conf: {confidence:.2f})"
-                    
-                    # Display result immediately
-                    if self.verbose:
-                        print(f"  {content_type[:-1].capitalize()} {paragraph_num}/{total_paragraphs}: {cascade_info} → {result_status}")
-                    else:
-                        # Update progress bar with total found count
-                        self._update_progress(self.current_total_processed, total_paragraphs, self.current_total_found)
                     
                     # Save progress after each paragraph
                     progress = {
