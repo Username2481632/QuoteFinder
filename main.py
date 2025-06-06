@@ -51,6 +51,7 @@ class TextClassifier:
         
         # Progress tracking
         self.start_time = None
+        self.session_start_processed = 0  # How many were processed when this session started
         
         # Create main output directory
         self.base_output_dir = Path("output")
@@ -440,6 +441,7 @@ Text: "{text}" """
             # Start timing for ETA calculation
             import time
             self.start_time = time.time()
+            self.session_start_processed = total_processed  # Track work done before this session
             
             # Process in batches
             for batch_start in range(0, len(remaining_paragraphs), batch_size):
@@ -532,10 +534,11 @@ Text: "{text}" """
                 status += f" | Found: {total_found}"
             
             # Add ETA if we have enough data
-            if self.start_time and current > 0:
+            if self.start_time and current > self.session_start_processed:
                 import time
                 elapsed = time.time() - self.start_time
-                avg_time_per_item = elapsed / current
+                session_work_done = current - self.session_start_processed
+                avg_time_per_item = elapsed / session_work_done
                 remaining_items = total - current
                 eta_seconds = remaining_items * avg_time_per_item
                 
