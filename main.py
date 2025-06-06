@@ -276,9 +276,6 @@ Text: "{text}" """
         max_attempts = 3
         
         for attempt in range(1, max_attempts + 1):
-            if self.verbose:
-                print(f"Attempt {attempt}/{max_attempts}...")
-            
             response = ollama.chat(
                 model=model_name,
                 messages=[{
@@ -296,8 +293,6 @@ Text: "{text}" """
             )
             
             generated_text = response['message']['content'].strip()
-            if self.verbose:
-                print(f"Full model response: '{generated_text}'")
             
             # Handle DeepSeek-R1 thinking format - extract final answer after </think>
             if '</think>' in generated_text:
@@ -306,19 +301,12 @@ Text: "{text}" """
             elif '<think>' in generated_text:
                 # Truncated thinking response - retry if we have attempts left
                 if attempt < max_attempts:
-                    if self.verbose:
-                        print(f"Response truncated (has <think> but no </think>), retrying...")
                     continue
                 else:
-                    if self.verbose:
-                        print(f"Response still truncated after {max_attempts} attempts")
                     final_answer = ""
             else:
                 # No thinking format
                 final_answer = generated_text
-            
-            if self.verbose:
-                print(f"Extracted final answer: '{final_answer}'")
             
             # Parse the response for clear answers
             if final_answer.startswith('1:'):
@@ -414,18 +402,17 @@ Text: "{text}" """
         for i, model_name in enumerate(self.model_names):
             response, confidence, explanation = self.classify_text(text, model_name)
             
-            if self.verbose:
-                print(f"    Model {i+1} ({model_name}): {response} (conf: {confidence:.2f})")
-            
             if response == self.negative_label:
                 # If any model in the cascade says negative, reject
                 if self.verbose:
-                    print(f"    Cascade rejected by model {i+1}")
+                    print(f"    Model {i+1}: {response} → rejected")
                 return self.negative_label, confidence, ""
+            elif self.verbose:
+                print(f"    Model {i+1}: {response}")
         
         # All models agreed it's positive - use final model's explanation
         if self.verbose:
-            print(f"    Cascade approved by all {len(self.model_names)} models")
+            print(f"    → All {len(self.model_names)} models approved")
         
         return self.positive_label, 0.95, explanation
 
@@ -507,7 +494,9 @@ Text: "{text}" """
                 batch_data = remaining_paragraphs[batch_start:batch_end]
                 
                 if self.verbose:
-                    print(f"\nProcessing batch {batch_start//batch_size + 1}/{(len(remaining_paragraphs) + batch_size - 1)//batch_size}")
+                    batch_num = batch_start//batch_size + 1
+                    total_batches = (len(remaining_paragraphs) + batch_size - 1)//batch_size
+                    print(f"\nBatch {batch_num}/{total_batches}")
                 
                 try:
                     # Process batch in parallel
