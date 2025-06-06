@@ -262,10 +262,11 @@ class TextClassifier:
         
         return stanzas
 
-    def classify_text(self, text: str, model_name: str) -> tuple[str, float, str]:
+    def classify_text(self, text: str, model_name: str, need_explanation: bool = True) -> tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
-        # Build full prompt from the classification description
-        combined_prompt = f"""Does this text match the following criteria:
+        # Build prompt - simpler for cascade models that don't need explanations
+        if need_explanation:
+            combined_prompt = f"""Does this text match the following criteria:
 ```
 {self.search_criteria}
 ```
@@ -274,6 +275,14 @@ If you answer "1", provide a brief 1-sentence explanation of what you found.
 If you answer "0", just respond with "0".
 
 Format: Either "0" or "1: [explanation]"
+
+Text: "{text}" """
+        else:
+            combined_prompt = f"""Does this text match the following criteria:
+```
+{self.search_criteria}
+```
+Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.
 
 Text: "{text}" """
         
@@ -409,7 +418,9 @@ Text: "{text}" """
         cascade_decisions = []
         
         for i, model_name in enumerate(self.model_names):
-            response, confidence, explanation = self.classify_text(text, model_name)
+            # Only final model needs to generate explanations
+            is_final_model = (i == len(self.model_names) - 1)
+            response, confidence, explanation = self.classify_text(text, model_name, need_explanation=is_final_model)
             cascade_decisions.append(f"Model {i+1}: {response}")
             
             if response == self.negative_label:
