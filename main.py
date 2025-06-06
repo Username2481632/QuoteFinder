@@ -702,15 +702,16 @@ Text: "{text}" """
 
     def _process_paragraphs_continuously(self, paragraph_list: List[Tuple[int, str]], paragraphs: List[str], content_type: str, total_paragraphs: int) -> None:
         """Process all paragraphs continuously with up to 8 concurrent evaluations."""
-        import sys
         import threading
         
         # Thread-safe state management
         stanza_states: Dict[int, Dict[str, Any]] = {}
         completed_stanzas: set[int] = set()
-        active_lines: List[int] = []  # Ordered list of paragraph_nums currently displayed
-        active_lines_status: Dict[int, Tuple[str, bool]] = {}  # Maps paragraph_num to (content, is_completed)
         display_lock: threading.Lock = threading.Lock()
+        
+        # Progress tracking
+        completed_count = 0
+        found_count = 0
         
         # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
@@ -721,46 +722,17 @@ Text: "{text}" """
             }
 
         def update_line(paragraph_num: int, line_content: str, is_final: bool = False) -> None:
-            """Thread-safe line update with complete redraw approach."""
+            """Simple progress display - just print completed results."""
+            nonlocal completed_count, found_count
             with display_lock:
-                if paragraph_num not in active_lines:
-                    # First time - just add and print normally
-                    active_lines.append(paragraph_num)
-                    active_lines_status[paragraph_num] = (line_content, is_final)
-                    print(line_content)
-                else:
-                    # Update existing line - use complete redraw approach
-                    active_lines_status[paragraph_num] = (line_content, is_final)
-                    
-                    # Clear all active lines from display
-                    num_lines = len(active_lines)
-                    if num_lines > 1:
-                        # Move up to first line and clear all
-                        sys.stdout.write(f"\033[{num_lines-1}A")
-                        for _ in range(num_lines):
-                            sys.stdout.write("\033[2K\033[B")  # Clear line and move down
-                        # Move back up to start
-                        sys.stdout.write(f"\033[{num_lines}A")
-                    else:
-                        # Single line - just clear current line
-                        sys.stdout.write("\033[G\033[2K")
-                    
-                    # Redraw all lines in order
-                    for i, para_num in enumerate(active_lines):
-                        content, _ = active_lines_status[para_num]
-                        if i == len(active_lines) - 1:
-                            # Last line - print normally
-                            print(content)
-                        else:
-                            # Not last line - write without extra newline and move down
-                            sys.stdout.write(content + "\n")
-                    
-                    sys.stdout.flush()
-                
-                # Clean up completed stanzas from the front
-                while active_lines and active_lines_status[active_lines[0]][1]:
-                    completed_paragraph = active_lines.pop(0)
-                    del active_lines_status[completed_paragraph]
+                if is_final:
+                    # Only print when a stanza is completely finished
+                    completed_count += 1
+                    if "● found" in line_content:
+                        found_count += 1
+                    print(f"[{completed_count}/{total_paragraphs}] {line_content}")
+                # For intermediate updates, we'll just ignore them
+                # This eliminates all the ANSI complexity and threading issues
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             active_futures: Dict[Any, Tuple[int, int]] = {}
