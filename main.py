@@ -520,13 +520,8 @@ Text: "{text}" """
                             
                         total_processed += 1
                         
-                        # Update instance variables for signal handler access
-                        self.current_paragraph = paragraph_num
-                        self.current_total_processed = total_processed
-                        
                         if response == '1':
                             total_found += 1
-                            self.current_total_found = total_found
                             self.append_result(paragraph_num + 1, paragraphs[paragraph_num], confidence, explanation)
                             result_status = f"● found (conf: {confidence:.2f})"
                         else:
@@ -705,11 +700,23 @@ Text: "{text}" """
                     try:
                         result = future.result()
                         results.append(result)
+                        
+                        # Update progress immediately for signal handler access
+                        paragraph_num, response, confidence, explanation = result
+                        self.current_paragraph = paragraph_num
+                        self.current_total_processed += 1
+                        if response == '1':
+                            self.current_total_found += 1
+                            
                     except Exception as e:
                         paragraph_num = paragraph_info[0]
                         if self.verbose:
                             print(f"\nError in batch processing for paragraph {paragraph_num}: {e}")
                         results.append((paragraph_num, '0', 0.0, ""))
+                        
+                        # Update progress even for errors
+                        self.current_paragraph = paragraph_num
+                        self.current_total_processed += 1
         
         # Sort results by paragraph number to maintain order
         results.sort(key=lambda x: x[0])
