@@ -884,20 +884,17 @@ def signal_handler(signum, frame):
     
     print("\n\nReceived cancellation signal (Ctrl+C). Saving progress and stopping immediately...")
     
-    # Try to save current progress if we have a classifier instance
-    if classifier_instance:
-        try:
-            # Use the current progress state from instance variables
-            # This reflects the most recent completed work
-            current_progress = {
-                "last_paragraph": classifier_instance.current_paragraph,
-                "total_processed": classifier_instance.current_total_processed,
-                "total_found": classifier_instance.current_total_found
-            }
-            classifier_instance.save_progress(current_progress)
-            print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
-        except Exception as e:
-            print(f"Could not save progress: {e}")
+    # Save current progress - classifier_instance is guaranteed to exist
+    try:
+        current_progress = {
+            "last_paragraph": classifier_instance.current_paragraph,
+            "total_processed": classifier_instance.current_total_processed,
+            "total_found": classifier_instance.current_total_found
+        }
+        classifier_instance.save_progress(current_progress)
+        print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
+    except Exception as e:
+        print(f"Could not save progress: {e}")
     
     print("Cancelled.")
     
@@ -906,7 +903,6 @@ def signal_handler(signum, frame):
     sys.stderr.flush()
     
     # Force immediate termination - bypasses cleanup and Python exit handlers
-    # This will terminate all threads and the entire process immediately
     os._exit(1)
 
 
