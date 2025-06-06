@@ -802,7 +802,7 @@ Text: "{text}" """
                             }
                             self.save_progress(progress)
                             
-                            # Start next paragraph from queue if available
+                            # ALWAYS start next paragraph when ANY stanza completes (rejected)
                             if paragraph_queue and self.model_names:
                                 next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
                                 next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
@@ -851,7 +851,7 @@ Text: "{text}" """
                             }
                             self.save_progress(progress)
                             
-                            # Start next paragraph from queue if available
+                            # ALWAYS start next paragraph when ANY stanza completes (approved)
                             if paragraph_queue and self.model_names:
                                 next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
                                 next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
@@ -870,7 +870,7 @@ Text: "{text}" """
                         
                         completed_stanzas.add(paragraph_num)
                         
-                        # Start next paragraph from queue if available
+                        # ALWAYS start next paragraph when ANY stanza completes (error)
                         if paragraph_queue and self.model_names:
                             next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
                             next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
