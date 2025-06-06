@@ -1,180 +1,80 @@
-# Quote Finder
+# QuoteFinder
 
-Extract paragraphs containing specific content from text using local language models. Supports both HTML files (like Huckleberry Finn) and TXT files (like The Odyssey).
+**Intelligent text analysis using cascaded AI verification**
 
-## Multi-Model Support
+Extract paragraphs and passages that match specific criteria from any text using local language models with optional multi-model verification for enhanced precision.
 
-The tool supports using multiple AI models for improved accuracy:
-
-- **Single model**: Fast, standard classification
-- **Multiple models**: Enhanced precision through verification
-- **Flexible configuration**: Use 1-5+ models based on your needs
-
-## Setup
-
-1. **Install Ollama** from https://ollama.ai/download
-2. **Pull models**: 
-   ```bash
-   # Example
-   ollama pull gemma3:4b
-   ollama pull qwen3:4b
-   ollama pull deepseek-r1:8b
-   ```
-3. **Install dependencies**: `pip install beautifulsoup4 ollama`
-
-## Usage
+## Quick Start
 
 ```bash
-# Create new directory with next available number (default)
+# Install dependencies
+pip install beautifulsoup4 ollama
+
+# Pull AI models (Ollama will auto-start)
+ollama pull gemma3:4b qwen3:4b
+
+# Run analysis
 python main.py
-
-# Use specific directory number (keeps existing files)
-python main.py --directory 5
-python main.py -d 0
-
-# Clear files in specific directory and restart
-python main.py --directory 5 --restart
-python main.py -d 0 -r
-
-# Use different configuration files
-python main.py -c sample_config.json      # Default configuration
-python main.py -c my_custom_config.json   # Your custom analysis
-
-# Simple mode - raw quotes only (faster)
-python main.py --simple
-python main.py -s
-
-# Verbose output
-python main.py -v
-
-# Combine flags
-python main.py -d 3 -r -s -v -c sample_config.json
 ```
 
-## File Format Support
+## How It Works
 
-The script automatically detects file types and processes them appropriately:
+1. **Configure**: Specify your text file, AI models, and search criteria
+2. **Process**: AI models analyze each paragraph/stanza for matches
+3. **Verify**: Optional multi-model consensus reduces false positives
+4. **Extract**: Matching passages saved with explanations and confidence scores
 
-- **HTML files** (`.html`): Split into paragraphs for prose analysis
-- **TXT files** (`.txt`): Split into stanzas for poetry analysis
+## Configuration
 
-## Directory Management
+Create a JSON file specifying what to analyze:
 
-The script organizes results in numbered subdirectories:
+```json
+{
+  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"],
+  "target_file": "your_text.html",
+  "search_criteria": "descriptions of character emotions or internal conflict"
+}
+```
+
+## Key Features
+
+- **Cascaded Verification**: Multiple AI models verify each match for precision
+- **Format Agnostic**: Processes HTML (paragraphs) and TXT (stanzas) automatically  
+- **Organized Output**: Results saved in numbered directories with progress tracking
+- **Resumable**: Interrupted analysis can be resumed from where it left off
+- **Real-time Feedback**: Live progress updates with verbose mode
+- **Performance Optimized**: Concurrent processing with intelligent model management
+
+## Command Options
+
+```bash
+python main.py                    # New analysis in next available directory
+python main.py -d 5              # Use specific directory (keeps existing files)  
+python main.py -d 5 -r           # Clear directory 5 and restart fresh
+python main.py -c my_config.json # Use custom configuration
+python main.py -v                # Verbose real-time progress display
+python main.py -s                # Simple mode (quotes only, faster)
+```
+
+## Output Structure
 
 ```
 output/
 ├── 0/
-│   ├── raw_quotes.txt
-│   ├── detailed_results.txt
-│   └── progress.json
-├── 1/
-│   ├── raw_quotes.txt
-│   ├── detailed_results.txt
-│   └── progress.json
-└── 2/
-    └── ...
-```
-
-- **No flags**: Create next available numbered directory (e.g., if 0,1,2 exist, creates 3)
-- **`-d N/--directory N`**: Use directory `N` (keeps existing files)
-- **`-r/--restart`**: Clear files in whichever directory gets used (requires `-d`)
-- **`-d N -r`**: Use directory `N` and clear existing files to restart fresh
-
-## Configuration
-
-Configuration files specify the models, target file, and search criteria:
-
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"],
-  "target_file": "huckleberry_finn.html",
-  "search_criteria": "Your search description here..."
-}
-```
-
-### Multi-Model Setup
-
-- **`model_names`**: Array of models to use
-- **Single model**: `["qwen3:4b"]` - Fast, standard classification
-- **Multiple models**: `["gemma3:4b", "qwen3:4b"]` - Enhanced accuracy through verification
-- **Custom setup**: Use any combination of available models
-
-### Sample Configuration
-
-The included `sample_config.json` provides a starting template:
-
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"],
-  "target_file": "huckleberry_finn.html",
-  "search_criteria": "explicit description of a character comparing themselves to another person"
-}
-```
-
-### Creating Custom Configs
-
-1. Copy `sample_config.json` to a new file (e.g., `my_analysis.json`)
-2. Update `target_file` to point to your text file 
-3. Update `model_names` array with your preferred models
-4. Modify `search_criteria` to describe what you're looking for
-5. Ensure your target file is in the project directory
-
-### File Types Supported:
-- **HTML files** (`.html`): Split into paragraphs for prose analysis
-- **TXT files** (`.txt`): Split into stanzas for poetry analysis
-
-## Features
-
-- **Multi-model support** - Use single or multiple AI models for classification
-- **Automatic model management** - Models load on-demand and stay cached for performance
-- **Automatic Ollama startup** - Starts Ollama if not running
-- **Multiple file formats** - HTML (paragraphs) and TXT (stanzas)
-- **Numbered run directories** - Organize multiple experimental runs
-- **Progress tracking** - Resume interrupted processing
-- **Graceful cancellation** - Ctrl+C stops after current batch, saves progress
-- **Real-time output** - See results as they're found
-- **Configurable** - Easy prompt and model customization
-- **Performance optimized** - Model keep-alive and parallel batch processing
-- **Cross-platform** - Works on Windows, Mac, Linux
-
-## Model Setup Options
-
-### Single Model (fastest)
-```json
-{
-  "model_names": ["qwen3:4b"]
-}
-```
-
-### Dual Model Verification
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b"]
-}
-```
-
-### Enhanced Precision
-```json
-{
-  "model_names": ["gemma3:4b", "qwen3:4b", "deepseek-r1:8b"]
-}
+│   ├── raw_quotes.txt           # Clean extracted passages
+│   ├── detailed_results.txt     # Full analysis with explanations  
+│   └── progress.json           # Resumption state
+└── 1/...
 ```
 
 ## Multi-Model Verification
 
-When using multiple models, each paragraph is processed sequentially:
+- **Single Model**: `["qwen3:4b"]` → Fast standard analysis
+- **Dual Verification**: `["gemma3:4b", "qwen3:4b"]` → Enhanced accuracy  
+- **Cascade Verification**: `["model1", "model2", "model3"]` → Maximum precision
 
-1. **First model** analyzes the text
-2. **Additional models** verify positive results
-3. **All models must agree** for a match to be approved
+Each passage must be approved by **all** specified models to be included in results, dramatically reducing false positives while maintaining sensitivity.
 
-### Example Output
-```
-  Model 1 (gemma3:4b): 1 (conf: 0.95)
-  Model 2 (qwen3:4b): 1 (conf: 0.89)  
-  ✓ Match approved by all models
-● found (conf: 0.95)
-```
+---
 
-This approach reduces false positives while maintaining good detection rates.
+*Built for researchers, analysts, and anyone who needs reliable automated text analysis with explainable AI reasoning.*
