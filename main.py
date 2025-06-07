@@ -770,6 +770,7 @@ Text: "{text}" """
         # Scrolling window for display (show last N completed + active processes)
         MAX_COMPLETED_DISPLAY = 8  # Show only last 8 completed items
         recent_completed: List[int] = []  # Recently completed stanzas in order
+        display_initialized = False  # Track if we've shown the display yet
         
         # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
@@ -779,31 +780,26 @@ Text: "{text}" """
                 'final_result': None
             }
         
-        # Initialize display for verbose mode
-        if verbose:
-            print("Recent Completions:")
-            for _ in range(MAX_COMPLETED_DISPLAY):
-                print("  [waiting...]")
-            
-            print("Active Processes:")
-            for _ in range(8):
-                print("  [waiting...]")
-        
         def update_display() -> None:
             """Update the scrolling display: recent completions + active processes."""
+            nonlocal display_initialized
             if not verbose:
                 return
                 
             with display_lock:
-                # Clear the entire display area first
-                # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) = 18 lines
-                total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8
-                
-                # Move cursor up to overwrite previous display
-                sys.stdout.write(f"\033[{total_lines}A")
-                
-                # Clear from cursor to end of screen to avoid artifacts
-                sys.stdout.write("\033[0J")
+                if display_initialized:
+                    # Clear the entire display area first
+                    # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) = 18 lines
+                    total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8
+                    
+                    # Move cursor up to overwrite previous display
+                    sys.stdout.write(f"\033[{total_lines}A")
+                    
+                    # Clear from cursor to end of screen to avoid artifacts
+                    sys.stdout.write("\033[0J")
+                else:
+                    # First time - just start writing
+                    display_initialized = True
                 
                 # Update recent completions section
                 sys.stdout.write("Recent Completions:\n")
