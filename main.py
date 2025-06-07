@@ -909,6 +909,10 @@ Text: "{text}" """
                 for future in done:
                     paragraph_num, model_idx = active_futures.pop(future)
                     
+                    # Skip processing if cancelled
+                    if self.cancelled:
+                        continue
+                    
                     if paragraph_num in completed_stanzas:
                         continue
                     
@@ -1189,6 +1193,10 @@ def signal_handler(signum: int, frame: Any) -> None:
     global classifier_instance
     
     print("\n\nReceived cancellation signal (Ctrl+C). Saving progress and stopping immediately...")
+    
+    # Set cancellation flag to stop processing loop
+    if classifier_instance is not None:
+        classifier_instance.cancelled = True
     
     # Save current progress - classifier_instance is guaranteed to exist
     try:
