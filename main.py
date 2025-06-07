@@ -86,6 +86,7 @@ class TextClassifier:
         self.current_paragraph: int = 0
         self.current_total_processed: int = 0
         self.current_total_found: int = 0
+        self.completed_paragraphs: set[int] = set()  # Track which paragraphs are completed
         
         # Set output files (all within the run directory)
         self.progress_file = self.output_dir / "progress.json"
@@ -176,17 +177,26 @@ class TextClassifier:
             # This shouldn't happen since _load_config would have failed first
             raise FileNotFoundError(f"Source config file {source_path} not found")
         
-    def load_progress(self) -> Dict[str, int]:
-        """Load progress from JSON file."""
-        if self.progress_file.exists():
-            with open(self.progress_file, 'r') as f:
-                return json.load(f)
-        return {"last_paragraph": 0, "total_processed": 0, "total_found": 0}
-    
-    def save_progress(self, progress: Dict[str, int]):
+    def save_progress(self, progress: Dict[str, Any]) -> None:
         """Save progress to JSON file."""
         with open(self.progress_file, 'w') as f:
             json.dump(progress, f, indent=2)
+
+    def load_progress(self) -> Dict[str, Any]:
+        """Load progress from JSON file."""
+        try:
+            if self.progress_file.exists():
+                with open(self.progress_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            if self.verbose:
+                print(f"Error loading progress: {e}")
+        
+        # Return empty progress state
+        return {
+            'completed_paragraphs': [],
+            'total_found': 0
+        }
     
     def _create_output_file_header(self) -> None:
         """Create output files with headers if they don't exist."""
@@ -496,7 +506,7 @@ Text: "{text}" """
         
         return self.positive_label, 0.95, explanation, cascade_info
 
-    def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, int]:
+    def process_text_file(self, text_path: Union[str, None] = None) -> Dict[str, Any]:
         """
         Process the text file and return results.
         
@@ -517,17 +527,18 @@ Text: "{text}" """
         
         # Load progress
         progress = self.load_progress()
-        start_paragraph = progress["last_paragraph"]
-        total_processed = progress["total_processed"]
+        completed_paragraphs = set(progress["completed_paragraphs"])
         total_found = progress["total_found"]
+        total_processed = len(completed_paragraphs)  # Derived from completed list
         
         # Initialize current progress state
-        self.current_paragraph = start_paragraph
         self.current_total_processed = total_processed
         self.current_total_found = total_found
+        self.completed_paragraphs = completed_paragraphs
         
-        if start_paragraph > 0:
-            print(f"Resuming from paragraph {start_paragraph + 1}")
+        if completed_paragraphs:
+            max_completed = max(completed_paragraphs) if completed_paragraphs else -1
+            print(f"Resuming: {len(completed_paragraphs)} paragraphs already completed (up to #{max_completed + 1})")
             if total_found > 0:
                 print(f"Previously found {total_found} matches")
         else:
@@ -553,15 +564,15 @@ Text: "{text}" """
             
             total_paragraphs = len(paragraphs)
             
-            # Prepare paragraph data for continuous processing
-            remaining_paragraphs = [(i, paragraph) for i, paragraph in enumerate(paragraphs[start_paragraph:], start_paragraph)]
+            # Prepare paragraph data for continuous processing - skip already completed paragraphs
+            remaining_paragraphs = [(i, paragraph) for i, paragraph in enumerate(paragraphs) if i not in completed_paragraphs]
             
             if self.verbose:
                 print(f"Total {content_type} to process: {total_paragraphs}")
-                print(f"Starting from {content_type[:-1]}: {start_paragraph + 1}")
+                print(f"Remaining {content_type}: {len(remaining_paragraphs)}")
                 print(f"Using continuous processing with up to 8 parallel workers")
             else:
-                print(f"Processing {total_paragraphs} {content_type}...")
+                print(f"Processing {len(remaining_paragraphs)} remaining {content_type}...")
             
             # Start timing for ETA calculation
             import time
@@ -583,8 +594,7 @@ Text: "{text}" """
                 print(f"\n\nProcessing interrupted by user.")
                 print(f"Progress saved. Resume by running the script again.")
                 return {
-                    "last_paragraph": self.current_total_processed + start_paragraph,
-                    "total_processed": self.current_total_processed,
+                    "completed_paragraphs": list(self.completed_paragraphs),
                     "total_found": self.current_total_found
                 }
                 
@@ -601,8 +611,7 @@ Text: "{text}" """
             print(f"\n\nProcessing cancelled by user.")
             print(f"Progress saved. Resume by running the script again.")
             return {
-                "last_paragraph": total_processed + start_paragraph,
-                "total_processed": total_processed,
+                "completed_paragraphs": list(self.completed_paragraphs),
                 "total_found": total_found
             }
         
@@ -625,7 +634,10 @@ Text: "{text}" """
         # Clear progress file on completion
         self.progress_file.unlink(missing_ok=True)
         
-        return progress
+        return {
+            "completed_paragraphs": list(self.completed_paragraphs),
+            "total_found": total_found
+        }
 
     def _format_eta(self, eta_seconds: float) -> str:
         """Format ETA seconds into a compact, readable string."""
@@ -930,6 +942,7 @@ Text: "{text}" """
                             # Update progress tracking
                             self.current_paragraph = paragraph_num
                             self.current_total_processed += 1
+                            self.completed_paragraphs.add(paragraph_num)
                             
                             # Move to completed and remove from active
                             completed_stanzas.add(paragraph_num)
@@ -942,8 +955,7 @@ Text: "{text}" """
                             
                             # Save progress
                             progress = {
-                                "last_paragraph": paragraph_num,
-                                "total_processed": self.current_total_processed,
+                                "completed_paragraphs": list(self.completed_paragraphs),
                                 "total_found": self.current_total_found
                             }
                             self.save_progress(progress)
@@ -979,6 +991,7 @@ Text: "{text}" """
                             self.current_paragraph = paragraph_num
                             self.current_total_processed += 1
                             self.current_total_found += 1
+                            self.completed_paragraphs.add(paragraph_num)
                             self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, explanation)
                             
                             # Update progress display
@@ -996,19 +1009,10 @@ Text: "{text}" """
                                 processed_count = self.current_total_processed
                                 found_count = self.current_total_found
                                 self._update_progress(processed_count, total_paragraphs, found_count)
-                                
-                                # Save progress
-                                progress = {
-                                    "last_paragraph": paragraph_num,
-                                    "total_processed": self.current_total_processed,
-                                    "total_found": self.current_total_found
-                                }
-                                self.save_progress(progress)
                             
-                            # Save progress
+                            # Save progress (single save for both verbose and non-verbose)
                             progress = {
-                                "last_paragraph": paragraph_num,
-                                "total_processed": self.current_total_processed,
+                                "completed_paragraphs": list(self.completed_paragraphs),
                                 "total_found": self.current_total_found
                             }
                             self.save_progress(progress)
@@ -1201,13 +1205,13 @@ def signal_handler(signum: int, frame: Any) -> None:
     # Save current progress - classifier_instance is guaranteed to exist
     try:
         if classifier_instance is not None:
-            current_progress: Dict[str, int] = {
-                "last_paragraph": classifier_instance.current_paragraph,
-                "total_processed": classifier_instance.current_total_processed,
+            current_progress: Dict[str, Any] = {
+                "completed_paragraphs": list(classifier_instance.completed_paragraphs),
                 "total_found": classifier_instance.current_total_found
             }
             classifier_instance.save_progress(current_progress)
-            print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
+            total_processed = len(classifier_instance.completed_paragraphs)
+            print(f"Progress saved (processed: {total_processed}, found: {current_progress['total_found']}).")
         else:
             print("No classifier instance to save progress from.")
     except Exception as e:
