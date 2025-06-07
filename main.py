@@ -31,18 +31,38 @@ import ollama
 
 
 class TextClassifier:
-    def __init__(self, config_file: str = 'sample_config.json', verbose: bool = False, simple: bool = False, restart: bool = False, directory: Union[None, int] = None):
+    def __init__(self, config_file: Optional[str] = None, verbose: bool = False, simple: bool = False, restart: bool = False, directory: Union[None, int] = None):
         """
         Initialize the Text Classifier.
         
         Args:
-            config_file: Path to the configuration JSON file
+            config_file: Path to the configuration JSON file (None to auto-detect)
             verbose: Whether to show detailed debug output
             simple: If True, only generate raw quotes without explanations
             restart: If True, start fresh with next available directory number
             directory: If provided, use this specific directory number
         """
-        self.config = self._load_config(config_file)
+        # Store parameters for later use in config resolution
+        self.verbose = verbose
+        self.simple = simple
+        self.restart = restart
+        self.directory = directory
+        
+        # Create main output directory early
+        self.base_output_dir = Path("output")
+        self.base_output_dir.mkdir(exist_ok=True)
+        
+        # Determine the run directory first
+        self.output_dir = self._get_run_directory()
+        self.output_dir.mkdir(exist_ok=True)
+        
+        # Resolve and load config
+        resolved_config_file = self._resolve_config_file(config_file)
+        self.config = self._load_config(resolved_config_file)
+        
+        # Copy config to output directory if a config file was specified
+        if config_file is not None:
+            self._copy_config_to_output(config_file)
         
         # Support model_names configuration
         if 'model_names' not in self.config:
@@ -54,10 +74,6 @@ class TextClassifier:
         if len(self.model_names) == 0:
             raise ValueError("model_names cannot be empty")
             
-        self.verbose = verbose
-        self.simple = simple
-        self.restart = restart
-        self.directory = directory
         self.prompt_template = self.config['search_criteria']
         self.search_criteria = self.config['search_criteria']
         
@@ -70,14 +86,6 @@ class TextClassifier:
         self.current_paragraph: int = 0
         self.current_total_processed: int = 0
         self.current_total_found: int = 0
-        
-        # Create main output directory
-        self.base_output_dir = Path("output")
-        self.base_output_dir.mkdir(exist_ok=True)
-        
-        # Determine the run directory
-        self.output_dir = self._get_run_directory()
-        self.output_dir.mkdir(exist_ok=True)
         
         # Set output files (all within the run directory)
         self.progress_file = self.output_dir / "progress.json"
@@ -122,6 +130,51 @@ class TextClassifier:
             raise ValueError(f"Configuration file '{config_file}' has empty values for: {', '.join(empty_fields)}")
         
         return config
+    
+    def _resolve_config_file(self, config_file: Optional[str]) -> str:
+        """
+        Resolve the configuration file path.
+        If config_file is provided, use it.
+        If not provided and using existing directory, look for config.json in that directory.
+        Otherwise, error out.
+        """
+        if config_file is not None:
+            # Config file explicitly provided
+            return config_file
+        
+        # No config file provided - look for config.json in the output directory
+        if self.directory is not None:
+            # Using specific directory - look for config.json there
+            config_path = self.output_dir / "config.json"
+            if config_path.exists():
+                if self.verbose:
+                    print(f"Using existing config file: {config_path}")
+                return str(config_path)
+            else:
+                raise FileNotFoundError(
+                    f"No config file specified and no config.json found in directory {self.output_dir}. "
+                    f"Please provide a config file with -c or ensure the directory has a config.json file."
+                )
+        else:
+            # Creating new directory but no config provided
+            raise FileNotFoundError(
+                "No config file specified. Please provide a config file with -c parameter."
+            )
+    
+    def _copy_config_to_output(self, source_config_file: str) -> None:
+        """Copy the source config file to config.json in the output directory."""
+        import shutil
+        
+        source_path = Path(source_config_file)
+        dest_path = self.output_dir / "config.json"
+        
+        if source_path.exists():
+            shutil.copy2(source_path, dest_path)
+            if self.verbose:
+                print(f"Copied config file from {source_path} to {dest_path}")
+        else:
+            # This shouldn't happen since _load_config would have failed first
+            raise FileNotFoundError(f"Source config file {source_path} not found")
         
     def load_progress(self) -> Dict[str, int]:
         """Load progress from JSON file."""
@@ -1026,7 +1079,7 @@ def start_ollama(verbose: bool = False) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract matching paragraphs from text using a local LLM")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed debug output")
-    parser.add_argument("--config", "-c", default="sample_config.json", help="Configuration file path")
+    parser.add_argument("--config", "-c", help="Configuration file path")
     parser.add_argument("--simple", "-s", action="store_true", help="Simple mode: only generate raw quotes without explanations")
     parser.add_argument("--restart", "-r", action="store_true", help="Clear files in the specified directory (use with -d)")
     parser.add_argument("--directory", "-d", type=int, help="Use specific directory number (e.g., -d 5 for output/5/)")
