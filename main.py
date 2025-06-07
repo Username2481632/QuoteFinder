@@ -795,18 +795,20 @@ Text: "{text}" """
                 return
                 
             with display_lock:
+                # Clear the entire display area first
                 # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) = 18 lines
                 total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8
                 
-                # Move to start of display
+                # Move cursor up to overwrite previous display
                 sys.stdout.write(f"\033[{total_lines}A")
                 
-                # Clear and update recent completions section
-                sys.stdout.write("\033[2K")  # Clear line
+                # Clear from cursor to end of screen to avoid artifacts
+                sys.stdout.write("\033[0J")
+                
+                # Update recent completions section
                 sys.stdout.write("Recent Completions:\n")
                 
                 for i in range(MAX_COMPLETED_DISPLAY):
-                    sys.stdout.write("\033[2K")  # Clear line
                     if i < len(recent_completed):
                         stanza_num = recent_completed[-(i+1)]  # Show most recent first
                         state = stanza_states[stanza_num]
@@ -817,13 +819,11 @@ Text: "{text}" """
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
-                # Clear and update active processes section
-                sys.stdout.write("\033[2K")  # Clear line
+                # Update active processes section
                 sys.stdout.write("Active Processes:\n")
                 
                 active_list = list(active_processes.items())
                 for i in range(8):
-                    sys.stdout.write("\033[2K")  # Clear line
                     if i < len(active_list):
                         stanza_num, status = active_list[i]
                         sys.stdout.write(f"  Stanza {stanza_num + 1}/{total_paragraphs}: {status}\n")
