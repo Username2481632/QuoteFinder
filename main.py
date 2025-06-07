@@ -627,26 +627,28 @@ Text: "{text}" """
         
         return progress
 
-    def _update_progress(self, current: int, total: int, total_found: int = 0):
-        """Update progress bar in place."""
-        if not self.verbose:
-            # Create a simple progress bar
-            progress = current / total
-            bar_length = 50
-            filled_length = int(bar_length * progress)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            # Calculate ETA if we have timing data
+    def _create_progress_bar_string(self, current: int, total: int, total_found: int = 0, prefix: str = "") -> str:
+        """Create a progress bar string with current/total counts, found count, and ETA."""
+        progress = current / total if total > 0 else 0
+        bar_length = 50
+        filled_length = int(bar_length * progress)
+        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+        
+        # Start with the basic progress info
+        if prefix:
+            status = f"{prefix}[{current:4d}/{total}] {bar} {progress:.1%}"
+        else:
             status = f"[{current:4d}/{total}] {bar} {progress:.1%}"
-            
-            if total_found > 0:
-                status += f" | Found: {total_found}"
-            
-            # Add ETA if we have enough data
-            if self.start_time and current > self.session_start_processed:
-                import time
-                elapsed = time.time() - self.start_time
-                session_work_done = current - self.session_start_processed
+        
+        if total_found > 0:
+            status += f" | Found: {total_found}"
+        
+        # Add ETA if we have enough data
+        if self.start_time and current > self.session_start_processed:
+            import time
+            elapsed = time.time() - self.start_time
+            session_work_done = current - self.session_start_processed
+            if session_work_done > 0:
                 avg_time_per_item = elapsed / session_work_done
                 remaining_items = total - current
                 eta_seconds = remaining_items * avg_time_per_item
@@ -657,6 +659,13 @@ Text: "{text}" """
                     status += f" | ETA: {eta_minutes}m{eta_seconds:02d}s"
                 else:
                     status += f" | ETA: {int(eta_seconds)}s"
+        
+        return status
+
+    def _update_progress(self, current: int, total: int, total_found: int = 0):
+        """Update progress bar in place."""
+        if not self.verbose:
+            status = self._create_progress_bar_string(current, total, total_found)
             
             # Use \r to overwrite the current line
             print(f"\r{status}", end="", flush=True)
@@ -789,8 +798,8 @@ Text: "{text}" """
             with display_lock:
                 if display_initialized:
                     # Clear the entire display area first
-                    # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) = 18 lines
-                    total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8
+                    # Total lines: 1 (header) + 8 (completed) + 1 (header) + 8 (active) + 1 (progress bar) = 19 lines
+                    total_lines = 1 + MAX_COMPLETED_DISPLAY + 1 + 8 + 1
                     
                     # Move cursor up to overwrite previous display
                     sys.stdout.write(f"\033[{total_lines}A")
@@ -826,6 +835,14 @@ Text: "{text}" """
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
+                # Add progress bar at the bottom (using the shared helper method)
+                progress_bar_string = self._create_progress_bar_string(
+                    self.current_total_processed, 
+                    total_paragraphs, 
+                    self.current_total_found, 
+                    "Progress: "
+                )
+                sys.stdout.write(progress_bar_string + "\n")
                 sys.stdout.flush()
         
         def add_completed_stanza(stanza_num: int) -> None:
