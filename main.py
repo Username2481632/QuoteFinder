@@ -177,17 +177,66 @@ class TextClassifier:
             # This shouldn't happen since _load_config would have failed first
             raise FileNotFoundError(f"Source config file {source_path} not found")
         
-    def save_progress(self, progress: Dict[str, Any]) -> None:
-        """Save progress to JSON file."""
-        with open(self.progress_file, 'w') as f:
-            json.dump(progress, f, indent=2)
+    def _compress_paragraph_list(self, paragraphs: List[int]) -> List[Union[int, List[int]]]:
+        """Compress a list of paragraph numbers into ranges for efficient storage.
+        
+        Examples:
+        [0, 1, 2, 5, 7, 8, 9] -> [range(0, 2), 5, range(7, 9)]
+        [1, 3, 5, 7] -> [1, 3, 5, 7]
+        [0, 1, 2, 3, 4] -> [range(0, 4)]
+        """
+        if not paragraphs:
+            return []
+        
+        sorted_paragraphs = sorted(set(paragraphs))
+        compressed = []
+        start = sorted_paragraphs[0]
+        end = start
+        
+        for i in range(1, len(sorted_paragraphs)):
+            if sorted_paragraphs[i] == end + 1:
+                # Continue the current range
+                end = sorted_paragraphs[i]
+            else:
+                # End current range and start a new one
+                if start == end:
+                    compressed.append(start)  # Single number
+                else:
+                    compressed.append([start, end])  # Range as [start, end]
+                start = sorted_paragraphs[i]
+                end = start
+        
+        # Add the final range
+        if start == end:
+            compressed.append(start)
+        else:
+            compressed.append([start, end])
+        
+        return compressed
+    
+    def _decompress_paragraph_list(self, compressed: List[Union[int, List[int]]]) -> List[int]:
+        """Decompress ranges back into a full list of paragraph numbers."""
+        paragraphs = []
+        for item in compressed:
+            if isinstance(item, int):
+                paragraphs.append(item)
+            elif isinstance(item, list) and len(item) == 2:
+                start, end = item
+                paragraphs.extend(range(start, end + 1))
+        return sorted(paragraphs)
 
     def load_progress(self) -> Dict[str, Any]:
-        """Load progress from JSON file."""
+        """Load progress from JSON file with decompression."""
         try:
             if self.progress_file.exists():
                 with open(self.progress_file, 'r') as f:
-                    return json.load(f)
+                    progress = json.load(f)
+                    
+                # Decompress the completed_paragraphs list
+                if 'completed_paragraphs' in progress:
+                    progress['completed_paragraphs'] = self._decompress_paragraph_list(progress['completed_paragraphs'])
+                    
+                return progress
         except Exception as e:
             if self.verbose:
                 print(f"Error loading progress: {e}")
@@ -197,7 +246,17 @@ class TextClassifier:
             'completed_paragraphs': [],
             'total_found': 0
         }
-    
+
+    def save_progress(self, progress: Dict[str, Any]) -> None:
+        """Save progress to JSON file with compression."""
+        # Compress the completed_paragraphs list before saving
+        compressed_progress = progress.copy()
+        if 'completed_paragraphs' in compressed_progress:
+            compressed_progress['completed_paragraphs'] = self._compress_paragraph_list(progress['completed_paragraphs'])
+        
+        with open(self.progress_file, 'w') as f:
+            json.dump(compressed_progress, f, indent=2)
+
     def _create_output_file_header(self) -> None:
         """Create output files with headers if they don't exist."""
         # Always create raw quotes file header
