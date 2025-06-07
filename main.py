@@ -189,7 +189,7 @@ class TextClassifier:
             return []
         
         sorted_paragraphs = sorted(set(paragraphs))
-        compressed = []
+        compressed: List[Union[int, List[int]]] = []
         start = sorted_paragraphs[0]
         end = start
         
@@ -216,11 +216,11 @@ class TextClassifier:
     
     def _decompress_paragraph_list(self, compressed: List[Union[int, List[int]]]) -> List[int]:
         """Decompress ranges back into a full list of paragraph numbers."""
-        paragraphs = []
+        paragraphs: List[int] = []
         for item in compressed:
             if isinstance(item, int):
                 paragraphs.append(item)
-            elif isinstance(item, list) and len(item) == 2:
+            elif len(item) == 2:  # It's a list with 2 elements
                 start, end = item
                 paragraphs.extend(range(start, end + 1))
         return sorted(paragraphs)
@@ -1013,7 +1013,7 @@ Text: "{text}" """
                             update_display()
                             
                             # Save progress
-                            progress = {
+                            progress: Dict[str, Any] = {
                                 "completed_paragraphs": list(self.completed_paragraphs),
                                 "total_found": self.current_total_found
                             }
@@ -1070,7 +1070,7 @@ Text: "{text}" """
                                 self._update_progress(processed_count, total_paragraphs, found_count)
                             
                             # Save progress (single save for both verbose and non-verbose)
-                            progress = {
+                            progress: Dict[str, Any] = {
                                 "completed_paragraphs": list(self.completed_paragraphs),
                                 "total_found": self.current_total_found
                             }
