@@ -627,8 +627,27 @@ Text: "{text}" """
         
         return progress
 
+    def _format_eta(self, eta_seconds: float) -> str:
+        """Format ETA seconds into a compact, readable string."""
+        if eta_seconds >= 86400:  # >= 1 day
+            eta_days = int(eta_seconds / 86400)
+            eta_hours = int((eta_seconds % 86400) / 3600)
+            return f"{eta_days}d{eta_hours}h"
+        elif eta_seconds >= 3600:  # >= 1 hour
+            eta_hours = int(eta_seconds / 3600)
+            eta_minutes = int((eta_seconds % 3600) / 60)
+            return f"{eta_hours}h{eta_minutes:02d}m"
+        elif eta_seconds > 60:
+            eta_minutes = int(eta_seconds / 60)
+            eta_seconds = int(eta_seconds % 60)
+            return f"{eta_minutes}m{eta_seconds:02d}s"
+        else:
+            return f"{int(eta_seconds)}s"
+
     def _create_progress_bar_string(self, current: int, total: int, total_found: int = 0, prefix: str = "") -> str:
         """Create a progress bar string with current/total counts, found count, and ETA."""
+        import shutil
+        
         progress = current / total if total > 0 else 0
         bar_length = 50
         filled_length = int(bar_length * progress)
@@ -643,7 +662,8 @@ Text: "{text}" """
         if total_found > 0:
             status += f" | Found: {total_found}"
         
-        # Add ETA if we have enough data
+        # Calculate and add ETA if we have enough data
+        eta_text = ""
         if self.start_time and current > self.session_start_processed:
             import time
             elapsed = time.time() - self.start_time
@@ -652,13 +672,32 @@ Text: "{text}" """
                 avg_time_per_item = elapsed / session_work_done
                 remaining_items = total - current
                 eta_seconds = remaining_items * avg_time_per_item
-                
-                if eta_seconds > 60:
-                    eta_minutes = int(eta_seconds / 60)
-                    eta_seconds = int(eta_seconds % 60)
-                    status += f" | ETA: {eta_minutes}m{eta_seconds:02d}s"
+                eta_text = f" | ETA: {self._format_eta(eta_seconds)}"
+        
+        status += eta_text
+        
+        # Ensure the status line fits within terminal width
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+            if len(status) > terminal_width:
+                # Truncate and add ellipsis, leaving room for the ellipsis
+                max_length = terminal_width - 3
+                if max_length > 0:
+                    status = status[:max_length] + "..."
                 else:
-                    status += f" | ETA: {int(eta_seconds)}s"
+                    # Terminal too narrow, just show basic info
+                    status = f"[{current}/{total}] {progress:.0%}"
+        except:
+            # If we can't get terminal size, create a compact version without the progress bar
+            compact_status = f"[{current:4d}/{total}] {progress:.1%}"
+            
+            if total_found > 0:
+                compact_status += f" | Found: {total_found}"
+            
+            # Add the same ETA text we calculated above
+            compact_status += eta_text
+            
+            status = compact_status
         
         return status
 
