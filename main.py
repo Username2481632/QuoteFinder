@@ -262,18 +262,18 @@ class TextClassifier:
         
         return stanzas
 
-    def classify_text(self, text: str, model_name: str, need_explanation: bool = True) -> Tuple[str, float, str]:
+    def classify_text(self, text: str, model_name: str, is_final_model: bool = True) -> Tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build prompt with conditional explanation instructions
         combined_prompt = f"""Does this text match the following criteria:
 ```
 {self.search_criteria}
 ```
-Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.{'''
-If you answer "1", provide a brief 1-sentence explanation of what you found.
+Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.
+{'''If you answer "1", provide a brief 1-sentence explanation of what you found.
 If you answer "0", just respond with "0".
 
-Format: Either "0" or "1: [explanation]"''' if need_explanation else ''}
+Format: Either "0" or "1: [explanation]"''' if is_final_model else "If unsure, put 1."}
 
 Text: "{text}" """
         
@@ -419,7 +419,7 @@ Text: "{text}" """
         for i, model_name in enumerate(self.model_names):
             # Only final model needs to generate explanations
             is_final_model = (i == len(self.model_names) - 1)
-            response, confidence, explanation = self.classify_text(text, model_name, need_explanation=is_final_model)
+            response, confidence, explanation = self.classify_text(text, model_name, is_final_model=is_final_model)
             cascade_decisions.append(f"Model {i+1}: {response}")
             
             # Send progress update after each model
@@ -791,7 +791,7 @@ Text: "{text}" """
                 if paragraph_queue and self.model_names:
                     try:
                         next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], is_final_model=False)
                         active_futures[next_future] = (next_paragraph_num, 0)
                         # Update active processes display
                         active_processes[next_paragraph_num] = "Model 1: processing..."
@@ -864,7 +864,7 @@ Text: "{text}" """
                                 self.classify_text, 
                                 state['paragraph'], 
                                 self.model_names[model_idx + 1], 
-                                need_explanation=is_final_model
+                                is_final_model=is_final_model
                             )
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
@@ -934,7 +934,7 @@ Text: "{text}" """
                 if paragraph_queue and self.model_names:
                     try:
                         next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
-                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], need_explanation=False)
+                        next_future = executor.submit(self.classify_text, next_paragraph, self.model_names[0], is_final_model=False)
                         active_futures[next_future] = (next_paragraph_num, 0)
                         return True
                     except Exception as e:
@@ -984,7 +984,7 @@ Text: "{text}" """
                                 self.classify_text, 
                                 paragraphs[paragraph_num], 
                                 self.model_names[model_idx + 1], 
-                                need_explanation=is_final_model
+                                is_final_model=is_final_model
                             )
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
