@@ -649,18 +649,6 @@ Text: "{text}" """
         import shutil
         
         progress = current / total if total > 0 else 0
-        bar_length = 50
-        filled_length = int(bar_length * progress)
-        bar = '█' * filled_length + '░' * (bar_length - filled_length)
-        
-        # Start with the basic progress info
-        if prefix:
-            status = f"{prefix}[{current:4d}/{total}] {bar} {progress:.1%}"
-        else:
-            status = f"[{current:4d}/{total}] {bar} {progress:.1%}"
-        
-        if total_found > 0:
-            status += f" | Found: {total_found}"
         
         # Calculate and add ETA if we have enough data
         eta_text = ""
@@ -674,32 +662,30 @@ Text: "{text}" """
                 eta_seconds = remaining_items * avg_time_per_item
                 eta_text = f" | ETA: {self._format_eta(eta_seconds)}"
         
-        status += eta_text
+        # Create compact format (used as fallback and for space calculation)
+        found_text = f" | Found: {total_found}" if total_found > 0 else ""
+        compact_status = f"{prefix}[{current:4d}/{total}] {progress:.1%}" + found_text + eta_text
         
-        # Ensure the status line fits within terminal width
+        # Try to add progress bar if we have terminal width and enough space
         try:
             terminal_width = shutil.get_terminal_size().columns
-            if len(status) > terminal_width:
-                # Truncate and add ellipsis, leaving room for the ellipsis
-                max_length = terminal_width - 3
-                if max_length > 0:
-                    status = status[:max_length] + "..."
-                else:
-                    # Terminal too narrow, just show basic info
-                    status = f"[{current}/{total}] {progress:.0%}"
+            base_status = f"{prefix}[{current:4d}/{total}] "
+            percentage_text = f" {progress:.1%}"
+            fixed_content_length = len(base_status + percentage_text + found_text + eta_text)
+            available_for_bar = terminal_width - fixed_content_length
+            
+            # Use progress bar if we have at least 10 characters for it
+            if available_for_bar >= 10:
+                bar_length = min(50, available_for_bar)  # Use available space, max 50
+                filled_length = int(bar_length * progress)
+                bar = '█' * filled_length + '░' * (bar_length - filled_length)
+                return base_status + bar + percentage_text + found_text + eta_text
+            else:
+                # Not enough space for progress bar, use compact format
+                return compact_status
         except:
-            # If we can't get terminal size, create a compact version without the progress bar
-            compact_status = f"[{current:4d}/{total}] {progress:.1%}"
-            
-            if total_found > 0:
-                compact_status += f" | Found: {total_found}"
-            
-            # Add the same ETA text we calculated above
-            compact_status += eta_text
-            
-            status = compact_status
-        
-        return status
+            # If we can't get terminal size, use compact format
+            return compact_status
 
     def _update_progress(self, current: int, total: int, total_found: int = 0):
         """Update progress bar in place."""
