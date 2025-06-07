@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 from typing import List, Tuple, Dict, Union, Any, Optional, Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import ollama
 
@@ -111,7 +111,7 @@ class TextClassifier:
             value = config[field]
             if field == 'model_names':
                 # model_names should be a non-empty list
-                if not isinstance(value, list) or len(value) == 0:
+                if not isinstance(value, list) or not value:
                     empty_fields.append(field)
             else:
                 # Other fields should be non-empty strings
@@ -392,7 +392,7 @@ Text: "{text}" """
         
         return matches / total_samples
 
-    def classify_with_cascade(self, text: str, progress_callback: Optional[Callable] = None, stanza_info: str = "") -> Tuple[str, float, str, str]:
+    def classify_with_cascade(self, text: str, progress_callback: Optional[Callable[..., None]] = None, stanza_info: str = "") -> Tuple[str, float, str, str]:
         """
         Classify text using cascade verification with multiple models.
         First model detects positives, subsequent models verify them.
@@ -650,11 +650,11 @@ Text: "{text}" """
         
         return run_dir
 
-    def _process_paragraph_batch(self, paragraph_data: List[Tuple[int, str]], batch_size: int = 4) -> List[Tuple[int, str, float, str]]:
+    def _process_paragraph_batch(self, paragraph_data: List[Tuple[int, str]], batch_size: int = 4) -> List[Tuple[int, str, float, str, str]]:
         """Process a batch of paragraphs in parallel."""
-        results = []
+        results: List[Tuple[int, str, float, str, str]] = []
         
-        def process_single_paragraph(paragraph_info):
+        def process_single_paragraph(paragraph_info: Tuple[int, str]) -> Tuple[int, str, float, str, str]:
             paragraph_num, paragraph = paragraph_info
             try:
                 response, confidence, explanation, cascade_info = self.classify_with_cascade(paragraph)
@@ -683,7 +683,7 @@ Text: "{text}" """
                         results.append(result)
                         
                         # Update progress immediately for signal handler access
-                        paragraph_num, response, confidence, explanation, cascade_info = result
+                        paragraph_num, response, _, _, _ = result
                         self.current_paragraph = paragraph_num
                         self.current_total_processed += 1
                         if response == '1':
@@ -955,7 +955,7 @@ Text: "{text}" """
                     paragraph_num, model_idx = active_futures.pop(future)
                     
                     try:
-                        response, confidence, explanation = future.result()
+                        response, _, _ = future.result()
                         
                         if response == self.negative_label:
                             # Rejected - finalize this stanza
@@ -998,7 +998,7 @@ Text: "{text}" """
                             self.current_paragraph = paragraph_num
                             self.current_total_processed += 1
                             self.current_total_found += 1
-                            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, explanation)
+                            self.append_result(paragraph_num + 1, paragraphs[paragraph_num], 0.95, "All models approved")
                             
                             # Update progress bar
                             self._update_progress(processed_count, len(paragraph_list), found_count)
@@ -1188,13 +1188,16 @@ def signal_handler(signum: int, frame: Any) -> None:
     
     # Save current progress - classifier_instance is guaranteed to exist
     try:
-        current_progress: Dict[str, int] = {
-            "last_paragraph": classifier_instance.current_paragraph,
-            "total_processed": classifier_instance.current_total_processed,
-            "total_found": classifier_instance.current_total_found
-        }
-        classifier_instance.save_progress(current_progress)
-        print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
+        if classifier_instance is not None:
+            current_progress: Dict[str, int] = {
+                "last_paragraph": classifier_instance.current_paragraph,
+                "total_processed": classifier_instance.current_total_processed,
+                "total_found": classifier_instance.current_total_found
+            }
+            classifier_instance.save_progress(current_progress)
+            print(f"Progress saved (processed: {current_progress['total_processed']}, found: {current_progress['total_found']}).")
+        else:
+            print("No classifier instance to save progress from.")
     except Exception as e:
         print(f"Could not save progress: {e}")
     
