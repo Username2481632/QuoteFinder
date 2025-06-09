@@ -1008,9 +1008,16 @@ Text: "{text}" """
                             if paragraph_num in active_processes:
                                 del active_processes[paragraph_num]
                             
-                            # Add to recent completed and update display
-                            add_completed_stanza(paragraph_num)
-                            update_display()
+                            # Update display for both verbose and non-verbose
+                            if verbose:
+                                # Add to recent completed and update display
+                                add_completed_stanza(paragraph_num)
+                                update_display()
+                            else:
+                                # Simple progress bar for non-verbose mode
+                                processed_count = self.current_total_processed
+                                found_count = self.current_total_found
+                                self._update_progress(processed_count, total_paragraphs, found_count)
                             
                             # Save progress
                             progress: Dict[str, Any] = {
@@ -1085,13 +1092,23 @@ Text: "{text}" """
                         
                         state = stanza_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
+                        self.current_total_processed += 1
+                        self.completed_paragraphs.add(paragraph_num)
                         completed_stanzas.add(paragraph_num)
                         if paragraph_num in active_processes:
                             del active_processes[paragraph_num]
                         
-                        # Add to recent completed and update display
-                        add_completed_stanza(paragraph_num)
-                        update_display()
+                        # Update display for both verbose and non-verbose
+                        if verbose:
+                            # Add to recent completed and update display
+                            add_completed_stanza(paragraph_num)
+                            update_display()
+                        else:
+                            # Simple progress bar for non-verbose mode
+                            processed_count = self.current_total_processed
+                            found_count = self.current_total_found
+                            self._update_progress(processed_count, total_paragraphs, found_count)
+                        
                         start_next_stanza_if_available()
 
 
