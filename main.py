@@ -693,7 +693,7 @@ Text: """{text}"""'''
                 content_type = "stanzas"
             elif file_extension == '.pdf':
                 full_text = self._extract_text_from_pdf(str(text_file))
-                paragraphs = self._split_paragraphs(full_text)
+                paragraphs = self._split_into_paragraphs(full_text)
                 # Combine into chunks of at least 20 lines
                 paragraphs = self._combine_paragraphs_to_chunks(paragraphs, min_lines=20)
                 content_type = "chunks"
