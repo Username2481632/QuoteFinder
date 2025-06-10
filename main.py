@@ -742,7 +742,7 @@ Text: "{text}" """
             terminal_width = shutil.get_terminal_size().columns
             base_status = f"{prefix}[{current:4d}/{total}] "
             percentage_text = f" {progress:.1%}"
-            fixed_content_length = len(base_status + percentage_text + found_text + eta_text)
+            fixed_content_length = len(base_status + percentage_text + found_text + eta_text) + 1 # Leave a character for the cursor to sit on
             available_for_bar = terminal_width - fixed_content_length
             
             # Use progress bar if we have at least 10 characters for it
