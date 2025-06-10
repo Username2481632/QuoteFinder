@@ -946,19 +946,19 @@ Text: """{text}"""'''
         from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
         
         # Thread-safe state management with scrolling window
-        stanza_states: Dict[int, Dict[str, Any]] = {}
-        completed_stanzas: set[int] = set()  # Track which stanzas are completed
-        active_processes: Dict[int, str] = {}  # Currently processing stanzas
+        chunk_states: Dict[int, Dict[str, Any]] = {}
+        completed_chunks: set[int] = set()  # Track which chunks are completed
+        active_processes: Dict[int, str] = {}  # Currently processing chunks
         display_lock: threading.Lock = threading.Lock()
         
         # Scrolling window for display (show last N completed + active processes)
         MAX_COMPLETED_DISPLAY = 8  # Show only last 8 completed items
-        recent_completed: List[int] = []  # Recently completed stanzas in order
+        recent_completed: List[int] = []  # Recently completed chunks in order
         display_initialized = False  # Track if we've shown the display yet
         
         # Initialize all paragraph states
         for paragraph_num, paragraph in paragraph_list:
-            stanza_states[paragraph_num] = {
+            chunk_states[paragraph_num] = {
                 'paragraph': paragraph,
                 'decisions': [],
                 'final_result': None
@@ -990,12 +990,12 @@ Text: """{text}"""'''
                 
                 for i in range(MAX_COMPLETED_DISPLAY):
                     if i < len(recent_completed):
-                        stanza_num = recent_completed[-(i+1)]  # Show most recent first
-                        state = stanza_states[stanza_num]
+                        chunk_num = recent_completed[i]  # Show oldest first, newest at bottom
+                        state = chunk_states[chunk_num]
                         decisions_str = " | ".join(state['decisions'])
                         response, confidence, _ = state['final_result']
                         result_status = f"● found (conf: {confidence:.2f})" if response == self.positive_label else f"○ skip (conf: {confidence:.2f})"
-                        sys.stdout.write(f"  Stanza {stanza_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
+                        sys.stdout.write(f"  Chunk {chunk_num + 1}/{total_paragraphs}: {decisions_str} → {result_status}\n")
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
@@ -1005,8 +1005,8 @@ Text: """{text}"""'''
                 active_list = list(active_processes.items())
                 for i in range(8):
                     if i < len(active_list):
-                        stanza_num, status = active_list[i]
-                        sys.stdout.write(f"  Stanza {stanza_num + 1}/{total_paragraphs}: {status}\n")
+                        chunk_num, status = active_list[i]
+                        sys.stdout.write(f"  Chunk {chunk_num + 1}/{total_paragraphs}: {status}\n")
                     else:
                         sys.stdout.write("  [waiting...]\n")
                 
@@ -1020,9 +1020,9 @@ Text: """{text}"""'''
                 sys.stdout.write(progress_bar_string + "\n")
                 sys.stdout.flush()
         
-        def add_completed_stanza(stanza_num: int) -> None:
-            """Add a stanza to the completed list, maintaining the scrolling window."""
-            recent_completed.append(stanza_num)
+        def add_completed_chunk(chunk_num: int) -> None:
+            """Add a chunk to the completed list, maintaining the scrolling window."""
+            recent_completed.append(chunk_num)
             # Keep only the most recent items
             if len(recent_completed) > MAX_COMPLETED_DISPLAY:
                 recent_completed.pop(0)
@@ -1031,8 +1031,8 @@ Text: """{text}"""'''
             active_futures: Dict[Any, Tuple[int, int]] = {}
             paragraph_queue: List[Tuple[int, str]] = list(paragraph_list)
             
-            def start_next_stanza_if_available() -> bool:
-                """Start the next stanza from queue if available. Returns True if started."""
+            def start_next_chunk_if_available() -> bool:
+                """Start the next chunk from queue if available. Returns True if started."""
                 if paragraph_queue and self.model_names:
                     try:
                         next_paragraph_num, next_paragraph = paragraph_queue.pop(0)
@@ -1044,13 +1044,13 @@ Text: """{text}"""'''
                         return True
                     except Exception as e:
                         if self.verbose:
-                            print(f"\nError starting next stanza: {e}")
+                            print(f"\nError starting next chunk: {e}")
                         return False
                 return False
             
             # Start initial batch of Model 1 evaluations (up to 8)
             for _ in range(min(8, len(paragraph_queue))):
-                start_next_stanza_if_available()
+                start_next_chunk_if_available()
             
             # Process results as they complete and keep queue flowing
             while active_futures and not self.cancelled:
@@ -1063,17 +1063,17 @@ Text: """{text}"""'''
                     if self.cancelled:
                         continue
                     
-                    if paragraph_num in completed_stanzas:
+                    if paragraph_num in completed_chunks:
                         continue
                     
                     try:
                         response, confidence, explanation = future.result()
-                        state = stanza_states[paragraph_num]
+                        state = chunk_states[paragraph_num]
                         state['decisions'].append(f"Model {model_idx + 1}: {response}")
                         decisions_str = " | ".join(state['decisions'])
                         
                         if response == self.negative_label:
-                            # Rejected - finalize this stanza
+                            # Rejected - finalize this chunk
                             state['decisions'][-1] += " → rejected"
                             state['final_result'] = (response, confidence, "")
                             
@@ -1083,14 +1083,14 @@ Text: """{text}"""'''
                             self.completed_paragraphs.add(paragraph_num)
                             
                             # Move to completed and remove from active
-                            completed_stanzas.add(paragraph_num)
+                            completed_chunks.add(paragraph_num)
                             if paragraph_num in active_processes:
                                 del active_processes[paragraph_num]
                             
                             # Update display for both verbose and non-verbose
                             if verbose:
                                 # Add to recent completed and update display
-                                add_completed_stanza(paragraph_num)
+                                add_completed_chunk(paragraph_num)
                                 update_display()
                             else:
                                 # Simple progress bar for non-verbose mode
@@ -1106,7 +1106,7 @@ Text: """{text}"""'''
                             self.save_progress(progress)
                             
                             # Start next paragraph
-                            start_next_stanza_if_available()
+                            start_next_chunk_if_available()
                             
                         elif model_idx + 1 < len(self.model_names):
                             # Continue to next model
@@ -1124,8 +1124,8 @@ Text: """{text}"""'''
                             )
                             active_futures[next_future] = (paragraph_num, model_idx + 1)
                             
-                            # Start new stanza
-                            start_next_stanza_if_available()
+                            # Start new chunk
+                            start_next_chunk_if_available()
                             
                         else:
                             # All models approved - finalize
@@ -1142,12 +1142,12 @@ Text: """{text}"""'''
                             # Update progress display
                             if verbose:
                                 # Move to completed and remove from active
-                                completed_stanzas.add(paragraph_num)
+                                completed_chunks.add(paragraph_num)
                                 if paragraph_num in active_processes:
                                     del active_processes[paragraph_num]
                                 
                                 # Add to recent completed and update display
-                                add_completed_stanza(paragraph_num)
+                                add_completed_chunk(paragraph_num)
                                 update_display()
                             else:
                                 # Simple progress bar for non-verbose mode
@@ -1163,24 +1163,24 @@ Text: """{text}"""'''
                             self.save_progress(progress)
                             
                             # Start next paragraph
-                            start_next_stanza_if_available()
+                            start_next_chunk_if_available()
                         
                     except Exception as e:
                         if self.verbose:
-                            print(f"\nError processing stanza {paragraph_num}, model {model_idx + 1}: {e}")
+                            print(f"\nError processing chunk {paragraph_num}, model {model_idx + 1}: {e}")
                         
-                        state = stanza_states[paragraph_num]
+                        state = chunk_states[paragraph_num]
                         state['final_result'] = ('0', 0.0, "")
                         self.current_total_processed += 1
                         self.completed_paragraphs.add(paragraph_num)
-                        completed_stanzas.add(paragraph_num)
+                        completed_chunks.add(paragraph_num)
                         if paragraph_num in active_processes:
                             del active_processes[paragraph_num]
                         
                         # Update display for both verbose and non-verbose
                         if verbose:
                             # Add to recent completed and update display
-                            add_completed_stanza(paragraph_num)
+                            add_completed_chunk(paragraph_num)
                             update_display()
                         else:
                             # Simple progress bar for non-verbose mode
@@ -1188,7 +1188,7 @@ Text: """{text}"""'''
                             found_count = self.current_total_found
                             self._update_progress(processed_count, total_paragraphs, found_count)
                         
-                        start_next_stanza_if_available()
+                        start_next_chunk_if_available()
 
 
 def verify_models_available(model_names: Union[str, List[str]]) -> None:
