@@ -410,20 +410,20 @@ class TextClassifier:
             paragraphs.append(' '.join(current).strip())
         return '\n\n'.join(paragraphs)
 
-    def _combine_paragraphs_to_chunks(self, paragraphs: list[str], min_lines: int = 20) -> list[str]:
-        """Combine consecutive paragraphs until each chunk has at least min_lines lines."""
+    def _combine_paragraphs_to_chunks(self, paragraphs: list[str], min_chars: int = 3000) -> list[str]:
+        """Combine consecutive paragraphs until each chunk has at least min_chars characters."""
         from typing import List
         chunks: List[str] = []
         current_chunk: List[str] = []
-        current_lines: int = 0
+        current_chars: int = 0
         for para in paragraphs:
-            lines_in_para = para.count('\n') + 1
+            chars_in_para = len(para)
             current_chunk.append(str(para))
-            current_lines += lines_in_para
-            if current_lines >= min_lines:
+            current_chars += chars_in_para + 2  # Add 2 for the '\n\n' separator
+            if current_chars >= min_chars:
                 chunks.append('\n\n'.join(current_chunk))
                 current_chunk = []
-                current_lines = 0
+                current_chars = 0
         if current_chunk:
             chunks.append('\n\n'.join(current_chunk))
         return chunks
@@ -694,8 +694,8 @@ Text: """{text}"""'''
             elif file_extension == '.pdf':
                 full_text = self._extract_text_from_pdf(str(text_file))
                 paragraphs = self._split_into_paragraphs(full_text)
-                # Combine into chunks of at least 20 lines
-                paragraphs = self._combine_paragraphs_to_chunks(paragraphs, min_lines=20)
+                # Combine into chunks of at least 3000 characters
+                paragraphs = self._combine_paragraphs_to_chunks(paragraphs, min_chars=3000)
                 content_type = "chunks"
             else:
                 raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .html, .txt, .pdf")
