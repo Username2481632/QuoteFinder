@@ -763,8 +763,8 @@ Text: "{text}" """
         if not self.verbose:
             status = self._create_progress_bar_string(current, total, total_found)
             
-            # Use \r to overwrite the current line
-            print(f"\r{status}", end="", flush=True)
+            # Use \r to move to start of line and \033[2K to clear the entire line
+            print(f"\r\033[2K{status}", end="", flush=True)
             
             # Print newline only when complete
             if current == total:
