@@ -28,6 +28,7 @@ from typing import List, Tuple, Dict, Union, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import ollama
+import PyPDF2
 
 
 class TextClassifier:
@@ -384,21 +385,69 @@ class TextClassifier:
         
         return stanzas
 
+    def _extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Extract text from a PDF file, joining lines into paragraphs and avoiding page break splits."""
+        text = ''
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    # Do not add an extra newline between pages
+                    text += page_text
+        # Now split and join lines as before
+        lines: List[str] = text.split('\n')
+        paragraphs: List[str] = []
+        current: List[str] = []
+        for line in lines:
+            if line.strip() == '':
+                if current:
+                    paragraphs.append(' '.join(current).strip())
+                    current = []
+            else:
+                current.append(str(line.strip()))
+        if current:
+            paragraphs.append(' '.join(current).strip())
+        return '\n\n'.join(paragraphs)
+
+    def _combine_paragraphs_to_chunks(self, paragraphs: list[str], min_lines: int = 20) -> list[str]:
+        """Combine consecutive paragraphs until each chunk has at least min_lines lines."""
+        from typing import List
+        chunks: List[str] = []
+        current_chunk: List[str] = []
+        current_lines: int = 0
+        for para in paragraphs:
+            lines_in_para = para.count('\n') + 1
+            current_chunk.append(str(para))
+            current_lines += lines_in_para
+            if current_lines >= min_lines:
+                chunks.append('\n\n'.join(current_chunk))
+                current_chunk = []
+                current_lines = 0
+        if current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+        return chunks
+
     def classify_text(self, text: str, model_name: str, is_final_model: bool = True) -> Tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build prompt with conditional explanation instructions
-        combined_prompt = f"""Does this text match the following criteria:
+        combined_prompt = f'''Does this text match the following criteria:
 ```
 {self.search_criteria}
 ```
-Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two.
-{'''If you answer "1", provide a brief 1-sentence explanation of what you found.
-If you answer "0", just respond with "0".
+{"""If it matches, respond in this JSON format (do not add any commentary or extra text):
+{{
+    "verdict": 1,
+    "excerpt": "Write out all relevant text from the segment, including both context and the main match.",
+    "explanation": "Write a brief 1-sentence explanation of what you found."
+}}
+If it does not match, respond with:
+{{
+    "verdict": 0
+}}""" if is_final_model else """Please answer with "1" if it matches, "0" if it does not. You must answer with one of the two. If unsure, put 1."""}
 
-Format: Either "0" or "1: [explanation]"''' if is_final_model else "If unsure, put 1."}
+Text: """{text}"""'''
 
-Text: "{text}" """
-        
         # Try up to 3 times with same token limit
         max_attempts = 3
         
@@ -435,7 +484,31 @@ Text: "{text}" """
                 # No thinking format
                 final_answer = generated_text
             
-            # Parse the response for clear answers
+            # Parse JSON for final model, legacy parsing for non-final models
+            if is_final_model:
+                try:
+                    # Extract JSON from response
+                    json_start = final_answer.find('{')
+                    json_end = final_answer.rfind('}') + 1
+                    if json_start != -1 and json_end > json_start:
+                        json_str = final_answer[json_start:json_end]
+                        result = json.loads(json_str)
+                        verdict = str(result.get('verdict', '0'))
+                        
+                        if verdict == '1':
+                            excerpt = result.get('excerpt', '')
+                            explanation = result.get('explanation', '')
+                            # Combine excerpt and explanation for output
+                            combined_text = f"{excerpt}\n\nExplanation: {explanation}".strip()
+                            return self.positive_label, 0.95, combined_text
+                        else:
+                            return self.negative_label, 0.95, ""
+                except Exception as e:
+                    if self.verbose:
+                        print(f"JSON parsing failed: {e}. Falling back to legacy parsing.")
+                    # Fall through to legacy parsing
+            
+            # Legacy parsing for non-final models or JSON parsing failures
             if final_answer.startswith('1:'):
                 explanation = final_answer[2:].strip()
                 return self.positive_label, 0.95, explanation
@@ -618,8 +691,14 @@ Text: "{text}" """
                 full_text = self._extract_text_from_txt(str(text_file))
                 paragraphs = self._split_txt_into_stanzas(full_text)
                 content_type = "stanzas"
+            elif file_extension == '.pdf':
+                full_text = self._extract_text_from_pdf(str(text_file))
+                paragraphs = self._split_paragraphs(full_text)
+                # Combine into chunks of at least 20 lines
+                paragraphs = self._combine_paragraphs_to_chunks(paragraphs, min_lines=20)
+                content_type = "chunks"
             else:
-                raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .html, .txt")
+                raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .html, .txt, .pdf")
             
             total_paragraphs = len(paragraphs)
             
