@@ -431,7 +431,7 @@ class TextClassifier:
     def classify_text(self, text: str, model_name: str, is_final_model: bool = True) -> Tuple[str, float, str]:
         """Classify text and return label with confidence and explanation."""
         # Build prompt with conditional explanation instructions
-        combined_prompt = f'''Does this text match the following criteria:
+        combined_prompt = f'''Does a segment of this text match the following criteria:
 ```
 {self.search_criteria}
 ```
