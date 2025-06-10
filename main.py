@@ -410,7 +410,7 @@ class TextClassifier:
             paragraphs.append(' '.join(current).strip())
         return '\n\n'.join(paragraphs)
 
-    def _combine_paragraphs_to_chunks(self, paragraphs: list[str], min_chars: int = 3000) -> list[str]:
+    def _combine_paragraphs_to_chunks(self, paragraphs: list[str], min_chars: int = 1600) -> list[str]:
         """Combine consecutive paragraphs until each chunk has at least min_chars characters."""
         from typing import List
         chunks: List[str] = []
@@ -694,8 +694,8 @@ Text: """{text}"""'''
             elif file_extension == '.pdf':
                 full_text = self._extract_text_from_pdf(str(text_file))
                 paragraphs = self._split_into_paragraphs(full_text)
-                # Combine into chunks of at least 3000 characters
-                paragraphs = self._combine_paragraphs_to_chunks(paragraphs, min_chars=3000)
+                # Combine into chunks (uses default character limit)
+                paragraphs = self._combine_paragraphs_to_chunks(paragraphs)
                 content_type = "chunks"
             else:
                 raise ValueError(f"Unsupported file type: {file_extension}. Supported types: .html, .txt, .pdf")
